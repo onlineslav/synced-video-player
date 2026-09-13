@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            command: npm run dist:win -- --publish never
+            artifact: windows
+          - os: macos-latest
+            command: npm run dist:mac -- --arm64 --publish never
+            artifact: mac-apple-silicon
+          - os: macos-15-intel
+            command: npm run dist:mac -- --x64 --publish never
+            artifact: mac-intel
+    runs-on: ${{ matrix.os }}
+    env:
+      TURN_CONFIG: ${{ secrets.TURN_CONFIG }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check bundled ffmpeg can burn in subtitles
+        run: node -e "const out = require('child_process').execFileSync(require('ffmpeg-static'), ['-hide_banner', '-filters']).toString(); if (!/ subtitles /.test(out)) throw new Error('bundled ffmpeg lacks libass')"
+      - run: npm test
+      - name: Add TURN relay config
+        if: env.TURN_CONFIG != ''
+        shell: bash
+        run: printf '%s' "$TURN_CONFIG" > config/turn.json
+      - run: ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+          if-no-files-found: error

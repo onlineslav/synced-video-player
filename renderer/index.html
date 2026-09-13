@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' wss: https:"
+    />
+    <title>Synced Video Player</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="home" class="home">
+      <div class="home-card">
+        <h1>Synced Video Player</h1>
+        <p class="lede">Watch together. Whoever opens a video hosts it, and both of you control playback.</p>
+        <button id="create" class="primary big">Create a room</button>
+        <div class="divider">or join one</div>
+        <form id="join-form" class="join">
+          <input id="join-code" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false" aria-label="Room code" />
+          <button type="submit">Join</button>
+        </form>
+      </div>
+    </main>
+
+    <section id="room" class="room" hidden>
+      <header class="topbar">
+        <button id="code" class="code" title="Copy room code"></button>
+        <span id="peer-status" class="peer-status"></span>
+        <span id="title" class="title"></span>
+        <span id="role" class="role"></span>
+        <button data-open-video>Open video</button>
+        <button id="leave" class="ghost">Leave</button>
+      </header>
+
+      <div id="stage" class="stage" data-role="idle">
+        <video id="local-video" class="local"></video>
+        <video id="remote-video" class="remote" playsinline></video>
+
+        <div id="empty" class="empty">
+          <p id="empty-text"></p>
+          <button data-open-video class="primary">Open video</button>
+        </div>
+        <div id="spinner" class="spinner" hidden></div>
+        <div id="toast" class="toast" hidden></div>
+
+        <div id="controls" class="controls">
+          <button id="play" class="icon" data-state="paused" title="Play / pause (Space)">
+            <svg class="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+            <svg class="icon-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z" /></svg>
+          </button>
+          <span id="time" class="time">0:00</span>
+          <input id="seek" class="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek" />
+          <span id="duration" class="time">0:00</span>
+          <select id="audio-select" title="Audio track"></select>
+          <select id="subtitle-select" title="Subtitles"></select>
+          <svg class="volume-icon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
+          <input id="volume" class="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          <button id="fullscreen" class="icon" title="Fullscreen (F)">
+            <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 4v-4h2v6h-6v-2z" /></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <script src="bundle.js"></script>
+  </body>
+</html>

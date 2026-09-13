@@ -1,0 +1,204 @@
+// Pure decisions about how to turn any file ffmpeg can read into a fragmented MP4 that
+// Chromium's MediaSource can play. No I/O here so it stays unit-testable.
+const CODECS = require('../shared/codecs.json')
+
+const IMAGE_SUBTITLE_CODECS = new Set(['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub'])
+const SUBTITLE_EXTENSIONS = ['.srt', '.ass', '.ssa', '.vtt']
+const HDR_TRANSFERS = new Set(['smpte2084', 'arib-std-b67'])
+
+const ENCODER_ARGS = {
+  libx264: ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'],
+  h264_nvenc: ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '21', '-b:v', '0'],
+  h264_qsv: ['-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '22'],
+  h264_amf: ['-c:v', 'h264_amf', '-quality', 'speed', '-rc', 'cqp', '-qp_i', '20', '-qp_p', '22'],
+  h264_videotoolbox: ['-c:v', 'h264_videotoolbox', '-b:v', '12M', '-realtime', '1'],
+}
+
+const baseName = (p) => p.split(/[\\/]/).pop()
+const dirName = (p) => p.slice(0, p.length - baseName(p).length) || '.'
+
+function trackLabel(stream, n, extra) {
+  const tags = stream.tags || {}
+  const lang = tags.language && tags.language !== 'und' ? tags.language.toUpperCase() : null
+  const parts = [tags.title, lang, extra].filter(Boolean)
+  return parts.length ? parts.join(' · ') : `Track ${n + 1}`
+}
+
+function summarizeProbe(probe, externalSubtitlePaths = []) {
+  const streams = probe.streams || []
+  const video = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic)
+
+  const audio = streams
+    .filter((s) => s.codec_type === 'audio')
+    .map((s, n) => ({
+      index: s.index,
+      label: trackLabel(s, n, `${s.codec_name}${s.channels > 2 ? ` ${s.channels}ch` : ''}`),
+      isDefault: s.disposition?.default === 1,
+    }))
+
+  const subtitles = []
+  // n counts every subtitle stream: ffmpeg's `si=` and `0:s:N` both index that way.
+  streams
+    .filter((s) => s.codec_type === 'subtitle')
+    .forEach((s, n) => {
+      if (!s.codec_name) return
+      subtitles.push({
+        id: `embedded:${n}`,
+        kind: 'embedded',
+        subIndex: n,
+        image: IMAGE_SUBTITLE_CODECS.has(s.codec_name),
+        label: trackLabel(s, n, s.disposition?.forced === 1 ? 'forced' : null),
+        isDefault: s.disposition?.default === 1,
+      })
+    })
+  for (const p of externalSubtitlePaths) subtitles.push(externalSubtitle(p))
+
+  return {
+    duration: Number(probe.format?.duration) || 0,
+    startTime: Number(probe.format?.start_time) || 0,
+    title: probe.format?.tags?.title || null,
+    video: video
+      ? {
+          index: video.index,
+          codec: video.codec_name,
+          pixFmt: video.pix_fmt,
+          width: video.width,
+          height: video.height,
+          transfer: video.color_transfer || null,
+        }
+      : null,
+    audio,
+    subtitles,
+  }
+}
+
+function externalSubtitle(path) {
+  return {id: `external:${path}`, kind: 'external', path, image: false, label: baseName(path), isDefault: false}
+}
+
+function isSubtitleSidecar(videoPath, candidate) {
+  const stem = baseName(videoPath).replace(/\.[^.]+$/, '').toLowerCase()
+  const name = baseName(candidate).toLowerCase()
+  return name.startsWith(stem) && SUBTITLE_EXTENSIONS.some((ext) => name.endsWith(ext))
+}
+
+// Codec string for MediaSource when the video stream is passed through untouched, or null if
+// it has to be transcoded. `support` maps shared/codecs.json keys to MediaSource.isTypeSupported.
+function copyCodecString(video, support) {
+  // Only 8-bit passes through: Chromium plays 10-bit fine locally, but captureStream hands
+  // WebRTC solid black frames for it, so the viewer would see nothing.
+  const eightBit = video.pixFmt === 'yuv420p' || (video.codec === 'h264' && video.pixFmt === 'yuvj420p')
+  const key = eightBit && ['h264', 'hevc', 'av1', 'vp9'].includes(video.codec) ? video.codec : null
+  return key && support[key] ? CODECS[key] : null
+}
+
+// Filter-graph escaping: once for the filter option value, once for the graph itself.
+function escapeFilterValue(value) {
+  const optionLevel = value.replace(/[\\':]/g, (c) => `\\${c}`)
+  return optionLevel.replace(/[\\'[\],;]/g, (c) => `\\${c}`)
+}
+
+function planSession({
+  media,
+  filePath,
+  start = 0,
+  keyframe = null,
+  audioIndex = null,
+  subtitleId = null,
+  support = {},
+  forceTranscode = false,
+  encoder = 'libx264',
+  canTonemap = false,
+}) {
+  const video = media.video
+  const subtitle = media.subtitles.find((s) => s.id === subtitleId) || null
+  const copyCodec = video && !subtitle && !forceTranscode ? copyCodecString(video, support) : null
+  // Stream copy can only start on a keyframe; transcoding seeks accurately.
+  const offset = copyCodec && keyframe != null ? Math.min(keyframe, start) : start
+  // ffmpeg backs a seek off by ~0.13s when the video has B-frames, which would land on the
+  // previous keyframe. Aim just past the keyframe we want instead.
+  const seekTo = copyCodec && keyframe != null && offset > 0 ? offset + 0.2 : offset
+
+  const args = ['-v', 'error', '-nostdin']
+  if (seekTo > 0) args.push('-ss', seekTo.toFixed(3))
+  // Burned-in subtitles are timed against the source timestamps.
+  if (subtitle) args.push('-copyts')
+  args.push('-i', filePath)
+
+  const codecs = []
+  let cwd = null
+
+  if (video && copyCodec) {
+    args.push('-map', `0:${video.index}`, '-c:v', 'copy')
+    if (video.codec === 'hevc') args.push('-tag:v', 'hvc1')
+    codecs.push(copyCodec)
+  } else if (video) {
+    const pixelFormat = encoder === 'libx264' ? 'yuv420p' : 'nv12'
+    const chain = []
+    if (canTonemap && HDR_TRANSFERS.has(video.transfer)) {
+      chain.push(
+        'zscale=t=linear:npl=100',
+        'format=gbrpf32le',
+        'zscale=p=bt709',
+        'tonemap=tonemap=hable:desat=0',
+        'zscale=t=bt709:m=bt709:r=tv',
+      )
+    }
+    chain.push("scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2")
+
+    if (subtitle && subtitle.image) {
+      const graph = [
+        `[0:${video.index}]${chain.join(',')}[base]`,
+        `[base][0:s:${subtitle.subIndex}]overlay=x=(W-w)/2:y=H-h:eof_action=pass[subbed]`,
+        `[subbed]format=${pixelFormat}[vout]`,
+      ]
+      args.push('-filter_complex', graph.join(';'), '-map', '[vout]')
+    } else {
+      if (subtitle) {
+        // Relative filename plus cwd sidesteps drive-letter colons in the filter graph.
+        const source = subtitle.kind === 'external' ? subtitle.path : filePath
+        cwd = dirName(source)
+        const si = subtitle.kind === 'embedded' ? `:si=${subtitle.subIndex}` : ''
+        chain.push(`subtitles=filename=${escapeFilterValue(baseName(source))}${si}`)
+      }
+      chain.push(`format=${pixelFormat}`)
+      args.push('-map', `0:${video.index}`, '-vf', chain.join(','))
+    }
+    args.push(...(ENCODER_ARGS[encoder] || ENCODER_ARGS.libx264), '-g', '48')
+    codecs.push(CODECS.h264)
+  }
+
+  if (audioIndex != null) {
+    args.push('-map', `0:${audioIndex}`, '-c:a', 'aac', '-b:a', '192k', '-ac', '2')
+    codecs.push(CODECS.aac)
+  }
+
+  args.push(
+    '-map_metadata', '-1',
+    '-map_chapters', '-1',
+    '-max_muxing_queue_size', '4096',
+    '-f', 'mp4',
+    '-movflags', 'empty_moov+default_base_moof+frag_keyframe',
+    '-frag_duration', '1000000',
+    'pipe:1',
+  )
+
+  const kind = video ? 'video' : 'audio'
+  return {
+    args,
+    cwd,
+    offset,
+    mime: `${kind}/mp4; codecs="${codecs.join(',')}"`,
+    transcoding: Boolean(video && !copyCodec),
+    encoder: video && !copyCodec ? encoder : null,
+  }
+}
+
+module.exports = {
+  ENCODER_ARGS,
+  escapeFilterValue,
+  externalSubtitle,
+  isSubtitleSidecar,
+  planSession,
+  summarizeProbe,
+}

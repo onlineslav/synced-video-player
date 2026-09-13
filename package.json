@@ -1,0 +1,71 @@
+{
+  "name": "synced-video-player",
+  "productName": "Synced Video Player",
+  "version": "0.1.0",
+  "description": "Watch local video files together. One host streams, everyone stays in sync.",
+  "main": "main/main.js",
+  "private": true,
+  "scripts": {
+    "bundle": "esbuild renderer/app.js --bundle --format=iife --target=chrome130 --outfile=renderer/bundle.js",
+    "start": "npm run bundle && electron .",
+    "test": "node --test",
+    "dist:win": "npm run bundle && electron-builder --win",
+    "dist:mac": "npm run bundle && electron-builder --mac"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "trystero": "^0.25.4"
+  },
+  "build": {
+    "appId": "app.syncedvideoplayer",
+    "productName": "Synced Video Player",
+    "files": [
+      "main/**",
+      "shared/**",
+      "renderer/index.html",
+      "renderer/styles.css",
+      "renderer/bundle.js",
+      "!node_modules/ffprobe-static/bin/linux/**"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
+    "extraResources": [
+      {
+        "from": "config",
+        "to": ".",
+        "filter": ["turn.json"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "files": [
+        "!node_modules/ffprobe-static/bin/darwin/**",
+        "!node_modules/ffprobe-static/bin/win32/ia32/**"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "artifactName": "${productName}-${version}-windows-setup.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.video",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "files": [
+        "!node_modules/ffprobe-static/bin/win32/**"
+      ]
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    }
+  }
+}

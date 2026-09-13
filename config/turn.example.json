@@ -1,0 +1,6 @@
+{
+  "cloudflare": {
+    "keyId": "YOUR_TURN_KEY_ID",
+    "apiToken": "YOUR_TURN_KEY_API_TOKEN"
+  }
+}
