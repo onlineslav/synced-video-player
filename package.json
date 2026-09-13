@@ -53,7 +53,7 @@
     },
     "nsis": {
       "oneClick": true,
-      "artifactName": "${productName}-${version}-windows-setup.${ext}"
+      "artifactName": "${name}-${version}-windows-setup.${ext}"
     },
     "mac": {
       "target": "dmg",
@@ -65,7 +65,7 @@
       ]
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+      "artifactName": "${name}-${version}-mac-${arch}.${ext}"
     }
   }
 }

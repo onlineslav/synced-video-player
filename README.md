@@ -16,9 +16,9 @@ Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M`
 
 ## Installing
 
-Get the installers from the latest run of the **Build** GitHub Action (under Artifacts).
+**[Download the latest release](https://github.com/onlineslav/synced-video-player/releases/latest)**
 
-- **Windows:** run `Synced Video Player-…-windows-setup.exe`. If SmartScreen appears, click **More info → Run anyway** (once).
+- **Windows:** run `synced-video-player-…-windows-setup.exe`. If SmartScreen appears, click **More info → Run anyway** (once).
 - **Mac:** open the `.dmg` for your Mac (`arm64` = Apple Silicon, `x64` = Intel) and drag the app to Applications. The app isn't notarized, so run this in Terminal once before the first launch:
 
   ```sh
@@ -45,4 +45,9 @@ npm run dist:win # Windows installer in dist/
 npm run dist:mac # Mac .dmg in dist/ (must run on a Mac)
 ```
 
-Pushing a tag like `v0.1.0`, or starting the **Build** workflow by hand, builds Windows, Apple Silicon and Intel Mac installers.
+Starting the **Build** workflow by hand builds Windows, Apple Silicon and Intel Mac installers as workflow artifacts. Pushing a version tag builds them and publishes a GitHub Release:
+
+```sh
+npm version patch   # bumps package.json and creates the tag
+git push --follow-tags
+```
