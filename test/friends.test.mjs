@@ -91,7 +91,7 @@ test('adding someone sends a request they can accept, and then you are friends',
 
   assert.equal(bob.friends.add(alice.identity.username), null)
   await until(
-    () => alice.friends.list()[0]?.online && bob.friends.list()[0]?.online,
+    () => alice.friends.list()[0]?.name === 'Bob' && bob.friends.list()[0]?.name === 'Alice',
     () => `friends connected: ${JSON.stringify({alice: alice.friends.list(), bob: bob.friends.list(), pair: [...(net.rooms.get(pairRoomId(alice.identity.username, bob.identity.username))?.keys() || [])], links: {a: [...alice.friends.links.keys()], b: [...bob.friends.links.keys()]}})}`,
   )
   assert.equal(alice.friends.list()[0].name, 'Bob')

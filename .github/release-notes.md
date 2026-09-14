@@ -1,3 +1,14 @@
+## What's new in 0.2.0
+
+- **Friends:** pick a username, add friends, see who's online or hosting, ask to join their room or invite them into yours.
+- **Playlist:** anyone can add files, drag to reorder, and the next one plays when a file ends.
+- **More than video:** open audio files and pictures (sent at full resolution).
+- **Draw together** on a whiteboard over the video, with an eraser.
+- **Reactions:** air horn, golf clap, quack and confetti.
+- **Your own subtitles:** each person picks their own subtitle track, or none.
+- **Player:** synced loop, mute, volume up to 200%, keep the window on top, and controls that hide while playing.
+- **Updates:** from this version on, Windows updates itself. Macs show a download button when a new version is out.
+
 ## Download
 
 Download the file for your computer from **Assets** below:
@@ -21,6 +32,7 @@ Not sure which Mac you have? Open the Apple menu → **About This Mac**. "Chip: 
 
 ## Watching together
 
-1. One person clicks **Create a room** and sends the code to the other.
-2. The other person types the code and clicks **Join**.
-3. Whoever clicks **Open video** hosts it. Both of you can pause, seek, and change subtitles.
+1. Pick a username and display name the first time the app opens.
+2. One person clicks **Create a room** and sends the code to the other, or invites them from the friends list.
+3. The other person types the code and clicks **Join**.
+4. Whoever clicks **Open media** (or drops a file on the window) hosts it. Everyone can pause, seek, and pick their own subtitles.
