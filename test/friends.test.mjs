@@ -1,17 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {FriendNetwork, helloText, pairRoomId, presenceText} from '../renderer/friends.mjs'
+import {FriendNetwork, helloText, inboxRoomId, pairRoomId, presenceText} from '../renderer/friends.mjs'
 import {createIdentity, sign, verifySigned} from '../renderer/identity.mjs'
 
 // Trystero in memory: everyone in a room id is connected to everyone else in it.
 function fakeTrystero() {
   const rooms = new Map()
   const joined = []
-  const joinRoomAs = (selfId) => (_config, roomId) => {
+  const joinRoomAs = (selfId) => (_config, roomId, callbacks) => {
     const members = rooms.get(roomId) || new Map()
     rooms.set(roomId, members)
     joined.push([selfId, roomId])
     const room = {
+      callbacks,
       actions: new Map(),
       onPeerJoin: null,
       onPeerLeave: null,
@@ -217,9 +218,95 @@ test('inviting a friend into your room only offers it, and they choose', async (
 })
 
 test('presenceText explains friends who have not added you back yet', () => {
-  assert.equal(presenceText({confirmed: false, requested: true}), 'Waiting for them to add you back')
-  assert.equal(presenceText({confirmed: false, requested: false}), 'Request sends when they next open the app')
+  assert.equal(presenceText({confirmed: false, requested: true}), 'Request delivered · awaiting acceptance')
+  assert.equal(presenceText({confirmed: false, requested: false}), 'Request queued · waiting for a connection')
+  assert.equal(presenceText({confirmed: false, connectionError: 'failed'}), 'Could not deliver request · still trying')
+  assert.equal(presenceText({confirmed: true, online: false, connectionError: 'failed'}), 'Connection unavailable · retrying')
+  assert.equal(presenceText({confirmed: true, online: true, connectionError: 'old error'}), 'Online')
   assert.equal(presenceText({confirmed: true, online: true, status: {hosting: true, title: null}}), 'Hosting a room')
+})
+
+test('an offline recipient gets a queued request after the sender restarts', async (t) => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bobIdentity = await createIdentity('tester')
+  alice.friends.add(bobIdentity.username)
+  assert.equal(alice.friends.list()[0].requested, false)
+  alice.friends.stop()
+
+  const sender = new FriendNetwork({joinRoom: net.joinRoomAs('a2'), selfId: 'a2', appId: 'test', storage: alice.storage})
+  sender.start(alice.identity, {name: 'Alice'})
+  const recipient = new FriendNetwork({joinRoom: net.joinRoomAs('b'), selfId: 'b', appId: 'test', storage: memoryStorage()})
+  t.after(() => {sender.stop(); recipient.stop()})
+  recipient.start(bobIdentity, {name: 'Bob'})
+  await until(() => recipient.requestList().length === 1, 'offline request delivered')
+  await until(() => sender.list()[0].requested, 'delivery acknowledged')
+  assert.equal(sender.list()[0].confirmed, false)
+  assert.equal(recipient.requestList()[0].username, alice.identity.username)
+})
+
+test('a received request survives restart and accepting it makes both friends online', async (t) => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bob = await person(net, 'b', 'Bob')
+  alice.friends.add(bob.identity.username)
+  await until(() => bob.friends.requestList().length === 1 && alice.friends.list()[0].requested, 'request stored and acknowledged')
+  bob.friends.stop()
+
+  const restored = new FriendNetwork({joinRoom: net.joinRoomAs('b2'), selfId: 'b2', appId: 'test', storage: bob.storage})
+  t.after(() => {alice.friends.stop(); restored.stop()})
+  assert.equal(restored.requestList()[0].username, alice.identity.username)
+  restored.start(bob.identity, {name: 'Bob'})
+  restored.add(alice.identity.username)
+  await until(() => restored.list()[0].online && alice.friends.list()[0].online, 'friends after accepting restored request')
+  assert.equal(restored.requestList().length, 0)
+  assert.deepEqual(bob.storage.load('friendRequests'), [])
+})
+
+test('friend connection failures are visible and clear when the friend connects', async (t) => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bob = await person(net, 'b', 'Bob')
+  t.after(() => {alice.friends.stop(); bob.friends.stop()})
+  alice.friends.add(bob.identity.username)
+  const requestRoom = alice.friends.links.get(inboxRoomId(bob.identity.username)).room
+  requestRoom.callbacks.onJoinError({error: 'could not connect after exchanging SDP'})
+  assert.match(presenceText(alice.friends.list()[0]), /Could not deliver/)
+  assert.equal(alice.friends.list()[0].requested, false)
+  await until(() => alice.friends.list()[0].requested, 'request succeeds later')
+  assert.equal(alice.friends.list()[0].connectionError, undefined)
+  bob.friends.add(alice.identity.username)
+  await until(() => alice.friends.list()[0].online && bob.friends.list()[0].online, 'connected')
+  alice.friends.inviteToRoom(bob.identity.username, 'ABCDEFGH')
+  assert.equal(alice.friends.list()[0].invited, true)
+  bob.friends.stop()
+  await until(() => !alice.friends.list()[0].online, 'friend offline')
+  assert.equal(alice.friends.list()[0].invited, false)
+  const pair = alice.friends.links.get(pairRoomId(alice.identity.username, bob.identity.username)).room
+  pair.callbacks.onJoinError({error: 'failed to reconnect'})
+  assert.equal(presenceText(alice.friends.list()[0]), 'Connection unavailable · retrying')
+  alice.friends.remove(bob.identity.username)
+  let changes = 0
+  alice.friends.addEventListener('change', () => changes++)
+  pair.callbacks.onJoinError({error: 'late error after removal'})
+  assert.equal(changes, 0)
+})
+
+test('a hello still being verified when a peer leaves cannot mark them online', async (t) => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  t.after(() => alice.friends.stop())
+  const bob = await createIdentity('tester')
+  alice.friends.add(bob.username)
+  const roomId = pairRoomId(alice.identity.username, bob.username)
+  const link = alice.friends.links.get(roomId)
+  link.room.onPeerJoin('b')
+  const hello = {username: bob.username, publicKey: bob.publicKey, signature: await sign(bob, helloText(roomId, 'b', 'a'))}
+  const verifying = link.actions.hello.onMessage(hello, {peerId: 'b'})
+  link.room.onPeerLeave('b')
+  await verifying
+  assert.equal(alice.friends.list()[0].online, false)
+  assert.equal(alice.friends.list()[0].confirmed, false)
 })
 
 test('add rejects bad input', async () => {

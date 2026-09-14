@@ -21,7 +21,11 @@ Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M`
 
 ### Friends
 
-The first time the app opens it asks for a username and a display name. The app adds a tag to the username so it's yours alone (e.g. `moviefan#k7qm-x3pa`). Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. The friends list shows who's online, who's in a room, and what they're hosting. Click **Ask to join** next to a friend in a room; if they let you in, you join without needing the code. Your display name is separate and can be changed any time. Picking a new username means friends have to add you again.
+The first time the app opens it asks for a username and a display name. The app adds a tag to the username so it's yours alone (e.g. `moviefan#k7qm-x3pa`). Copy the full username as your friend code and send it to a friend. They enter it under **Friends**; you get a request banner and a numbered badge on the Friends button, on Home or in a room. Click **Review**, then **Accept** or **Decline**. Requests are saved until you act on them, including after restarting the app.
+
+The sender sees whether their request is queued or delivered and awaiting acceptance. Delivery needs both apps to be open and able to connect; queued requests resume when the sender reopens the app. A failed connection shows a retrying status rather than claiming delivery.
+
+Once accepted, the friends list shows an online count and each friend's **Online**, **Offline**, **In a room**, or hosting status. Click **Ask to join** next to a friend in a room; if they let you in, you join without needing the room code. Your display name is separate and can be changed any time. Picking a new username means friends have to add you again.
 
 ## Installing
 

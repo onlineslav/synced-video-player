@@ -14,6 +14,7 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {cleanDisplayName} from './profile.mjs'
@@ -139,6 +140,11 @@ const ui = {
   friendUsername: $('friend-username'),
   friendError: $('friend-error'),
   friendRequests: $('friend-requests'),
+  friendRequestsTitle: $('friend-requests-title'),
+  friendNotification: $('friend-notification'),
+  friendNotificationText: $('friend-notification-text'),
+  reviewFriendRequests: $('review-friend-requests'),
+  friendsOnline: $('friends-online'),
   friendList: $('friend-list'),
   friendsEmpty: $('friends-empty'),
   joinRequests: $('join-requests'),
@@ -205,6 +211,7 @@ const player = new StreamPlayer(ui.localVideo)
 const blankSession = () => ({
   code: null,
   room: null,
+  connection: {joining: false, connectedBefore: false, waitingSince: 0, error: null, hasTurn: false},
   stateAction: null,
   commandAction: null,
   peers: new Set(),
@@ -244,11 +251,37 @@ let session = blankSession()
 
 // ---------- Room ----------
 
-async function enterRoom(code) {
+let enteringRoom = false
+async function enterRoom(code, {joining = true} = {}) {
+  if (enteringRoom || session.room) return
+  enteringRoom = true
+  ui.create.disabled = ui.joinForm.querySelector('button').disabled = true
+  try {
+    await openRoom(code, joining)
+  } catch (error) {
+    if (session.room) await leaveRoom()
+    toast(`Could not open the room: ${errorMessage(error)}`, true)
+  } finally {
+    enteringRoom = false
+    ui.create.disabled = ui.joinForm.querySelector('button').disabled = false
+  }
+}
+
+async function openRoom(code, joining) {
   const turnConfig = await window.api.iceServers().catch(() => [])
-  const room = joinRoom({appId: APP_ID, password: code, ...(turnConfig.length && {turnConfig})}, code)
+  const connection = {
+    joining, connectedBefore: false, waitingSince: performance.now(), error: null,
+    hasTurn: turnConfig.some(({urls}) => [].concat(urls).some((url) => /^turns?:/i.test(url))),
+  }
+  const room = joinRoom({appId: APP_ID, password: code, ...(turnConfig.length && {turnConfig})}, code, {
+    onJoinError: ({error}) => {
+      connection.error = error
+      if (session.connection === connection) render()
+    },
+  })
   session = {
     ...blankSession(),
+    connection,
     code,
     room,
     stateAction: room.makeAction('state'),
@@ -278,6 +311,9 @@ async function enterRoom(code) {
   }
 
   room.onPeerJoin = (peerId) => {
+    if (session.room !== room) return
+    connection.connectedBefore = true
+    connection.error = null
     session.peers.add(peerId)
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
     if (session.board.strokes.size) session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
@@ -294,7 +330,12 @@ async function enterRoom(code) {
   }
 
   room.onPeerLeave = (peerId) => {
+    if (session.room !== room) return
     session.peers.delete(peerId)
+    if (!session.peers.size) {
+      connection.waitingSince = performance.now()
+      connection.error = null
+    }
     session.peerStreams.delete(peerId)
     session.people.delete(peerId)
     forgetImage(peerId)
@@ -309,6 +350,7 @@ async function enterRoom(code) {
   }
 
   room.onPeerStream = (stream, peerId) => {
+    if (session.room !== room) return
     session.peerStreams.set(peerId, stream)
     applyViewerBuffer(room.getPeers()[peerId])
     attachRemoteStream()
@@ -329,7 +371,7 @@ async function enterRoom(code) {
   ui.code.textContent = formatRoomCode(code)
   ui.home.hidden = ui.settings.hidden = true
   ui.room.hidden = false
-  ui.room.append(ui.friends)
+  ui.room.append(ui.friends, ui.friendNotification)
   setFriendsOpen(false)
   renderFriends() // friends get Invite buttons
   setRole('idle')
@@ -348,7 +390,7 @@ async function leaveRoom() {
   setRole('idle')
   ui.room.hidden = ui.settings.hidden = true
   ui.home.hidden = false
-  ui.home.append(ui.friends)
+  ui.home.append(ui.friends, ui.friendNotification)
   setFriendsOpen(false)
   renderFriends()
   await room?.leave()
@@ -821,9 +863,9 @@ function renderFriends() {
       const main = element('div', 'person-main')
       main.append(element('div', 'person-name', name || username), element('div', 'person-stats', 'Wants to be friends'))
       main.lastChild.title = `Username: ${username}`
-      const accept = element('button', 'primary small', 'Add back')
-      accept.addEventListener('click', () => friendNetwork.add(username))
-      const ignore = element('button', 'ghost small', 'Ignore')
+      const accept = element('button', 'primary small', 'Accept')
+      accept.addEventListener('click', () => showFriendNotice(friendNetwork.add(username)))
+      const ignore = element('button', 'ghost small', 'Decline')
       ignore.addEventListener('click', () => friendNetwork.ignoreRequest(username))
       const actions = element('div', 'friend-actions')
       actions.append(accept, ignore)
@@ -840,6 +882,10 @@ function renderFriends() {
       const main = element('div', 'person-main')
       main.append(element('div', 'person-name', label), element('div', 'person-stats', presenceText(friend)))
       main.firstChild.title = `Username: ${friend.username}`
+      if (friend.connectionError) {
+        main.lastChild.classList.add('friend-connection-error')
+        main.lastChild.title = 'Could not connect to your friend. Both apps need to be open and able to connect. Some networks require a TURN relay. The app will keep trying.'
+      }
       const remove = element('button', 'friend-remove', '×')
       remove.title = 'Remove friend'
       remove.setAttribute('aria-label', `Remove ${label}`)
@@ -863,8 +909,22 @@ function renderFriends() {
     }),
   )
   ui.friendsEmpty.hidden = friends.length + requests.length > 0
-  const online = friends.some((friend) => !['offline', 'pending'].includes(presenceOf(friend)))
-  for (const toggle of ui.friendsToggles) toggle.dataset.dot = requests.length ? 'request' : online ? 'online' : ''
+  const online = friends.filter((friend) => friend.confirmed && friend.online).length
+  ui.friendsOnline.textContent = `${online} online`
+  ui.friendRequestsTitle.hidden = !requests.length
+  ui.friendRequestsTitle.textContent = `Friend requests (${requests.length})`
+  ui.friendNotification.hidden = !requests.length
+  const notification = requests.length === 1
+    ? `${requests[0].name || requests[0].username} sent you a friend request`
+    : `${requests.length} friend requests`
+  if (ui.friendNotificationText.textContent !== notification) ui.friendNotificationText.textContent = notification
+  for (const toggle of ui.friendsToggles) {
+    toggle.dataset.dot = requests.length ? 'request' : online ? 'online' : ''
+    toggle.dataset.requestCount = requests.length > 99 ? '99+' : String(requests.length)
+    const label = `Friends · ${online} online${requests.length ? ` · ${requests.length} pending ${requests.length === 1 ? 'request' : 'requests'}` : ''}`
+    toggle.title = label
+    toggle.setAttribute('aria-label', label)
+  }
 }
 
 function showFriendNotice(message, {error = true} = {}) {
@@ -901,7 +961,6 @@ async function joinFriendRoom(name, code, leaveQuestion) {
   }
   showFriendNotice(null)
   await enterRoom(roomCode)
-  toast(`Joined ${name}'s room`)
 }
 
 const receiveJoinInvite = ({name, code}) => joinFriendRoom(name, code, `${name} let you in. Leave this room and join theirs?`)
@@ -1461,7 +1520,10 @@ function render() {
   const time = currentTime()
 
   const peerCount = session.peers.size
-  ui.peerStatus.textContent = peerCount ? 'Friend connected' : 'Waiting for your friend to join…'
+  const connection = roomConnection(session.connection, peerCount, performance.now())
+  ui.peerStatus.textContent = connection.text
+  ui.peerStatus.title = connection.detail
+  ui.peerStatus.classList.toggle('problem', connection.problem)
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
   renderPeople()
   renderPlaylist()
@@ -1476,12 +1538,12 @@ function render() {
     ui.link.dataset.level = health.level
   }
   // Problems show as a faint caution sign on the video; hover it for the explanation.
-  const problem = health && health.level !== 'good'
+  const problem = connection.problem || (health && health.level !== 'good')
   ui.linkWarning.hidden = !problem
-  if (problem) ui.linkWarningTip.textContent = health.detail
+  if (problem) ui.linkWarningTip.textContent = connection.problem ? connection.detail : health.detail
   ui.title.textContent = (host ? hostedTitle() : r?.title) || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
-  ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: ''}[role]
+  ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: session.connection.joining && !peerCount ? 'Joining room' : ''}[role]
 
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
@@ -1495,7 +1557,7 @@ function render() {
     ? `Receiving the picture… ${Math.round(progress * 100)}%`
     : role === 'viewer'
       ? 'Your friend is opening something…'
-      : 'Drop a video, song or picture here, or open one to host it.'
+      : connection.detail || 'Drop a video, song or picture here, or open one to host it.'
   const audioOnly = ready && (host ? Boolean(player.media && !player.media.video) : Boolean(r?.audioOnly))
   ui.audioOnly.hidden = !audioOnly
   if (audioOnly) ui.audioOnlyTitle.textContent = ui.title.textContent
@@ -1542,7 +1604,7 @@ function toast(message, isError = false) {
 
 // ---------- Wiring ----------
 
-ui.create.addEventListener('click', () => enterRoom(generateRoomCode()))
+ui.create.addEventListener('click', () => enterRoom(generateRoomCode(), {joining: false}))
 
 ui.joinForm.addEventListener('submit', (event) => {
   event.preventDefault()
@@ -1821,7 +1883,10 @@ ui.addFriend.addEventListener('submit', (event) => {
   event.preventDefault()
   const error = identity ? friendNetwork.add(ui.friendUsername.value) : 'Still starting up, try again in a moment.'
   showFriendNotice(error)
-  if (!error) ui.friendUsername.value = ''
+  if (!error) {
+    ui.friendUsername.value = ''
+    showFriendNotice('Friend added to your list. Delivery status appears below.', {error: false})
+  }
 })
 
 // Home has no toast, so buttons confirm by briefly changing their own text.
@@ -1872,6 +1937,11 @@ for (const toggle of ui.friendsToggles) {
   toggle.addEventListener('click', () => setFriendsOpen(!ui.home.classList.contains('friends-open')))
 }
 ui.inviteFriends.addEventListener('click', () => setFriendsOpen(true))
+ui.reviewFriendRequests.addEventListener('click', () => {
+  setFriendsOpen(true)
+  wakeChrome()
+  ui.friendRequests.querySelector('button')?.focus()
+})
 
 // Pinned keeps the window above other apps. Home (bottom right) and the player controls each have a button,
 // so you can always unpin from wherever you are.
@@ -2121,7 +2191,7 @@ const chromeInUse = () =>
       tabDrag ||
       itemDrag ||
       !ui.reactions.hidden ||
-      ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, .playlist:hover, select:focus, input:focus'),
+      ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, .playlist:hover, .friends-drawer:hover, .friends-drawer:focus-within, select:focus, input:focus'),
   )
 function wakeChrome() {
   ui.room.classList.remove('idle')

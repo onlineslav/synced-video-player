@@ -48,19 +48,28 @@
 
       <div id="home-invites" class="home-invites"></div>
 
+      <div id="friend-notification" class="friend-notification" hidden>
+        <span id="friend-notification-text" role="status"></span>
+        <button id="review-friend-requests" class="primary small">Review</button>
+      </div>
+
       <aside id="friends" class="friends-drawer" aria-label="Friends">
-        <h2>Friends</h2>
+        <div class="friends-heading">
+          <h2>Friends</h2>
+          <span id="friends-online" class="hint" role="status">0 online</span>
+        </div>
         <div class="my-username">
           <button id="username" class="username" title="Copy your username">…</button>
-          <p class="hint">Your username. Send it to a friend so they can add you.</p>
+          <p class="hint">Your friend code. Copy the full username, including the tag after #, so a friend can add you.</p>
         </div>
         <form id="add-friend" class="add-friend">
-          <input id="friend-username" placeholder="Friend's username" autocomplete="off" spellcheck="false" aria-label="Friend's username" />
+          <input id="friend-username" placeholder="username#abcd-efgh" autocomplete="off" spellcheck="false" aria-label="Friend's full username or friend code" />
           <button type="submit">Add</button>
         </form>
         <p id="friend-error" class="friend-error" hidden></p>
-        <ul id="friend-requests" class="friend-list"></ul>
-        <ul id="friend-list" class="friend-list"></ul>
+        <h2 id="friend-requests-title" hidden>Friend requests</h2>
+        <ul id="friend-requests" class="friend-list" aria-labelledby="friend-requests-title"></ul>
+        <ul id="friend-list" class="friend-list" aria-label="Friends and their status"></ul>
         <p id="friends-empty" class="friends-empty">No friends yet. Add someone by their username.</p>
       </aside>
 

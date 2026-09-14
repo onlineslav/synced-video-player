@@ -101,7 +101,70 @@ button.ghost {
 }
 
 .friends-toggle[data-dot='request']::after {
+  content: attr(data-request-count);
+  top: -4px;
+  right: -6px;
+  width: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 10px;
   background: var(--accent);
+  color: white;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.friend-notification {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: max-content;
+  max-width: calc(100% - 120px);
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 20px #0005;
+  font-size: 14px;
+}
+
+.friend-notification span {
+  overflow-wrap: anywhere;
+}
+
+.room .friend-notification {
+  position: absolute;
+  bottom: 90px;
+  left: calc((100% - var(--playlist-width)) / 2);
+  max-width: calc(100% - var(--playlist-width) - 48px);
+}
+
+.friends-open .friend-notification {
+  display: none;
+}
+
+.friends-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.friend .friend-connection-error {
+  color: var(--danger);
+}
+
+.friend .person-stats {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .friends-open .friends-toggle svg {
@@ -1307,6 +1370,14 @@ button:disabled {
 
 .peer-status.connected {
   color: var(--ok);
+}
+
+.peer-status.problem {
+  color: var(--danger);
+}
+
+#empty-text {
+  max-width: 560px;
 }
 
 .link {
