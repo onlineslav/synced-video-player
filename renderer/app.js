@@ -39,7 +39,7 @@ import {
   removeItem,
   settledWidth,
 } from './playlist.mjs'
-import {averageLuminance, proximity, sourceRegion, toneFor} from './overlay.mjs'
+import {averageLuminance, sourceRegion, toneFor} from './overlay.mjs'
 import {
   BRUSH_SIZES,
   COLORS,
@@ -188,6 +188,9 @@ const ui = {
   audio: $('audio-select'),
   subtitles: $('subtitle-select'),
   volume: $('volume'),
+  volumeControl: $('volume-control'),
+  volumeReadout: $('volume-readout'),
+  mute: $('mute'),
   fullscreen: $('fullscreen'),
 }
 
@@ -629,6 +632,10 @@ function attachRemoteStream() {
   const stream = session.peerStreams.get(session.hostId)
   if (stream && ui.remoteVideo.srcObject !== stream) {
     ui.remoteVideo.srcObject = stream
+    routeRemoteAudio(stream)
+    stream.onaddtrack = () => {
+      if (ui.remoteVideo.srcObject === stream) routeRemoteAudio(stream)
+    }
     ui.remoteVideo.play().catch(() => {})
   }
 }
@@ -1206,7 +1213,7 @@ function visibleSource() {
 function sampleTabTone() {
   if (ui.room.hidden || ui.room.classList.contains('idle')) return
   const stage = ui.stage.getBoundingClientRect()
-  const tab = ui.playlistTab.getBoundingClientRect()
+  const tab = ui.playlistTab.querySelector('svg').getBoundingClientRect() // the chevron, not its large hit area
   const target = {x: tab.left - stage.left, y: tab.top - stage.top, width: tab.width, height: tab.height}
   const source = visibleSource()
   const rect = source && pictureRect(stage.width, stage.height, source.width, source.height)
@@ -1260,11 +1267,9 @@ function playReaction(kind) {
   const volume = Number(ui.volume.value)
   if (!volume) return
   try {
-    audio ??= new AudioContext()
-    audio.resume().catch(() => {})
+    const out = audioOutput()
     const gain = audio.createGain()
-    gain.gain.value = volume
-    gain.connect(audio.destination)
+    gain.connect(out)
     playReactionSound(audio, gain, kind)
     setTimeout(() => gain.disconnect(), 3000)
   } catch {}
@@ -1454,6 +1459,8 @@ function render() {
   ui.spinner.hidden = !stalled
 
   ui.controls.classList.toggle('disabled', !ready)
+  // A picture has nothing to play, seek or loop (control ignores them), so say so.
+  ui.play.disabled = ui.loop.disabled = ui.seek.disabled = imageMode
   ui.play.dataset.state = isPlaying() ? 'playing' : 'paused'
   ui.loop.classList.toggle('active', session.loop)
   ui.loop.setAttribute('aria-pressed', String(session.loop))
@@ -1596,14 +1603,6 @@ ui.playlistTab.addEventListener('click', () => {
 window.addEventListener('resize', () => {
   if (playlistOpen() && !tabDrag) showPlaylistWidth(fittedPlaylistWidth())
 })
-const setTabNear = (near) => ui.playlistTab.style.setProperty('--tab-near', near.toFixed(2))
-ui.room.addEventListener('mousemove', (event) => {
-  const box = ui.playlistTab.getBoundingClientRect()
-  const dx = Math.max(box.left - event.clientX, 0, event.clientX - box.right)
-  const dy = Math.max(box.top - event.clientY, 0, event.clientY - box.bottom)
-  setTabNear(proximity(Math.hypot(dx, dy)))
-})
-document.documentElement.addEventListener('mouseleave', () => setTabNear(0))
 try {
   const saved = JSON.parse(localStorage.getItem('playlist'))
   if (Number.isFinite(saved?.width)) playlistWidth = Math.min(DRAWER.maxWidth, Math.max(DRAWER.minWidth, saved.width))
@@ -1704,7 +1703,7 @@ ui.playlist.addEventListener('dragleave', (event) => {
 ui.playlist.addEventListener('drop', (event) => {
   event.preventDefault()
   ui.playlist.classList.remove('dropping')
-  addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)))
+  addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)).filter(Boolean))
 })
 
 // The display name picked on the welcome screen, or changed since.
@@ -1826,17 +1825,109 @@ ui.subtitles.addEventListener('change', async () => {
   selectSubtitle(image ? null : value)
 })
 
+// Unmuting goes back to the last volume the person chose. Only a released slider counts, so dragging
+// down to 0 doesn't remember the tiny value it passed on the way.
+let unmutedVolume = 1
+
+// Everything the app plays goes through one gain, because a <video>'s own volume stops at 100%.
+// The host's element is routed into Web Audio; Chromium still hands captureStream the audio before
+// that routing, so viewers don't hear the host's volume. The viewer's element is muted and its
+// WebRTC audio is taken straight from the stream (Chromium plays remote WebRTC audio through Web
+// Audio only while the stream is also attached to an element, which remoteVideo is).
+let output = null
+let remoteAudio = null
+
+function audioOutput() {
+  if (!output) {
+    audio ??= new AudioContext()
+    output = audio.createGain()
+    output.gain.value = Number(ui.volume.value)
+    output.connect(audio.destination)
+    audio.createMediaElementSource(ui.localVideo).connect(output)
+    ui.remoteVideo.muted = true
+  }
+  if (audio.state === 'suspended') audio.resume().catch(() => {})
+  return output
+}
+
+function routeRemoteAudio(stream) {
+  remoteAudio?.disconnect()
+  remoteAudio = null
+  if (!stream.getAudioTracks().length) return
+  remoteAudio = audio.createMediaStreamSource(stream)
+  remoteAudio.connect(audioOutput())
+}
+
 function setVolume(volume) {
-  ui.localVideo.volume = ui.remoteVideo.volume = volume
+  const gain = audioOutput().gain
+  gain.setTargetAtTime(volume, audio.currentTime, 0.015) // a short ramp, so muting doesn't click
   ui.volume.value = String(volume)
+  ui.volumeControl.style.setProperty('--ratio', String(volume / Number(ui.volume.max)))
+  ui.volumeReadout.value = `${Math.round(volume * 100)}%`
+  const muted = volume === 0
+  ui.mute.dataset.muted = String(muted)
+  ui.mute.title = muted ? 'Unmute (M)' : 'Mute (M)'
+  ui.mute.setAttribute('aria-pressed', String(muted))
   try {
     localStorage.setItem('volume', String(volume))
   } catch {}
 }
-ui.volume.addEventListener('input', () => setVolume(Number(ui.volume.value)))
+
+function rememberVolume(volume) {
+  if (!(volume > 0)) return
+  unmutedVolume = volume
+  try {
+    localStorage.setItem('unmutedVolume', String(volume))
+  } catch {}
+}
+
+function toggleMute() {
+  const volume = Number(ui.volume.value)
+  if (volume > 0) {
+    rememberVolume(volume)
+    setVolume(0)
+  } else {
+    setVolume(unmutedVolume)
+  }
+}
+
+// The percentage shows above the knob while dragging, and briefly after keyboard or wheel changes.
+let volumeDragging = false
+let volumeReadoutTimer = null
+
+function showVolumeReadout(lingerMs) {
+  clearTimeout(volumeReadoutTimer)
+  ui.volumeControl.classList.add('adjusting')
+  if (lingerMs == null) return
+  volumeReadoutTimer = setTimeout(() => ui.volumeControl.classList.remove('adjusting'), lingerMs)
+}
+
+function releaseVolume() {
+  if (!volumeDragging) return
+  volumeDragging = false
+  showVolumeReadout(600)
+}
+
+ui.volume.addEventListener('pointerdown', () => {
+  volumeDragging = true
+  showVolumeReadout()
+})
+ui.volume.addEventListener('pointerup', releaseVolume)
+ui.volume.addEventListener('pointercancel', releaseVolume)
+ui.volume.addEventListener('input', () => {
+  setVolume(Number(ui.volume.value))
+  showVolumeReadout(volumeDragging ? null : 1000)
+})
+ui.volume.addEventListener('change', () => {
+  rememberVolume(Number(ui.volume.value))
+  releaseVolume()
+})
+ui.mute.addEventListener('click', toggleMute)
 try {
+  rememberVolume(Number(localStorage.getItem('unmutedVolume')))
   const saved = localStorage.getItem('volume')
   if (saved != null) setVolume(Number(saved))
+  rememberVolume(Number(saved))
 } catch {}
 
 for (const type of ['play', 'pause', 'seeked', 'waiting', 'playing']) {
@@ -1879,7 +1970,7 @@ document.addEventListener('keydown', (event) => {
   } else if (event.code === 'KeyP') {
     setPlaylistOpen(!playlistOpen())
   } else if (event.code === 'KeyM') {
-    setVolume(Number(ui.volume.value) > 0 ? 0 : 1)
+    toggleMute()
   } else {
     const kind = Object.keys(REACTIONS).find((k) => REACTIONS[k].key === event.code || REACTIONS[k].key === `Digit${event.key}`)
     if (kind && !event.repeat) react(kind)
@@ -1941,6 +2032,8 @@ document.documentElement.addEventListener('mouseleave', () => {
 // Keep Electron from navigating to files dropped outside the stage.
 document.addEventListener('dragover', (event) => event.preventDefault())
 document.addEventListener('drop', (event) => event.preventDefault())
+// Nothing on the stage is draggable: a dragged picture would drop back in as a file with no path.
+ui.stage.addEventListener('dragstart', (event) => event.preventDefault())
 ui.stage.addEventListener('dragover', () => ui.stage.classList.add('dragging'))
 ui.stage.addEventListener('dragleave', (event) => {
   if (!ui.stage.contains(event.relatedTarget)) ui.stage.classList.remove('dragging')
@@ -1948,8 +2041,8 @@ ui.stage.addEventListener('dragleave', (event) => {
 ui.stage.addEventListener('drop', (event) => {
   ui.stage.classList.remove('dragging')
   const file = event.dataTransfer.files[0]
-  if (!file) return
-  const filePath = window.api.pathForFile(file)
+  const filePath = file && window.api.pathForFile(file)
+  if (!filePath) return // not a file on disk (dragged from a page, or from inside the app)
   if (!SUBTITLE_FILE.test(filePath)) return hostFile(filePath)
   addSubtitleFile(filePath)
 })

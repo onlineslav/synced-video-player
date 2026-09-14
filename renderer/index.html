@@ -108,7 +108,7 @@
       <div id="stage" class="stage" data-role="idle">
         <video id="local-video" class="local"></video>
         <video id="remote-video" class="remote" playsinline></video>
-        <img id="picture" class="picture" alt="" hidden />
+        <img id="picture" class="picture" alt="" draggable="false" hidden />
         <div id="captions" class="captions"></div>
         <canvas id="board" class="board"></canvas>
 
@@ -146,8 +146,14 @@
           </div>
           <select id="audio-select" title="Audio track"></select>
           <select id="subtitle-select" title="Subtitles"></select>
-          <svg class="volume-icon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
-          <input id="volume" class="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
+          <button id="mute" class="icon mute" data-muted="false" title="Mute (M)" aria-pressed="false">
+            <svg class="icon-sound" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
+            <svg class="icon-muted" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zM14.5 9.7l1.2-1.2 2.3 2.3 2.3-2.3 1.2 1.2-2.3 2.3 2.3 2.3-1.2 1.2-2.3-2.3-2.3 2.3-1.2-1.2 2.3-2.3z" /></svg>
+          </button>
+          <div id="volume-control" class="volume">
+            <input id="volume" class="volume-slider" type="range" min="0" max="2" step="0.01" value="1" aria-label="Volume" />
+            <output id="volume-readout" class="volume-readout" for="volume">100%</output>
+          </div>
           <button id="fullscreen" class="icon" title="Fullscreen (F)">
             <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 4v-4h2v6h-6v-2z" /></svg>
           </button>

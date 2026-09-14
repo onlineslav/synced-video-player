@@ -1,5 +1,5 @@
 // Small controls drawn straight over the video (the playlist tab) pick black or white from what's
-// behind them, and fade in as the mouse comes near, like system overlay buttons.
+// behind them.
 
 // The part of the media (in its own pixels) under `target`; both boxes are in stage pixels, and
 // `rect` is where the picture sits (pictureRect). Null when the target is over the letterbox.
@@ -26,6 +26,3 @@ export function averageLuminance(rgba) {
 
 // 'dark' means a black control. The gap between thresholds keeps it from flickering over grey.
 export const toneFor = (luminance, previous = 'light') => (luminance > 0.62 ? 'dark' : luminance < 0.45 ? 'light' : previous)
-
-// 1 with the pointer on the control, easing to 0 at `far` pixels away.
-export const proximity = (distance, far = 220) => Math.max(0, 1 - distance / far) ** 2

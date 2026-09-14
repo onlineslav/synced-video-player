@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {averageLuminance, proximity, sourceRegion, toneFor} from '../renderer/overlay.mjs'
+import {averageLuminance, sourceRegion, toneFor} from '../renderer/overlay.mjs'
 
 test('sourceRegion maps a box on the stage to media pixels', () => {
   const rect = {x: 0, y: 100, width: 960, height: 540} // 1920x1080 letterboxed
@@ -23,11 +23,4 @@ test('toneFor switches to black over bright pictures and holds steady over grey'
   assert.equal(toneFor(0.1, 'dark'), 'light')
   assert.equal(toneFor(0.55, 'dark'), 'dark')
   assert.equal(toneFor(0.55, 'light'), 'light')
-})
-
-test('proximity fades in as the pointer approaches', () => {
-  assert.equal(proximity(0), 1)
-  assert.equal(proximity(220), 0)
-  assert.equal(proximity(1000), 0)
-  assert.equal(proximity(110), 0.25)
 })

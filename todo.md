@@ -10,6 +10,8 @@ change word 'video' to 'media' and allow all media types.
 
 - you can start or end rooms/lobbies sort of like a group on discord. when you open that lobby or room the playlist/playback of whatever media, etc. is all persistent and it remembers everyone's settings/subtitles, everything so you can close the session and restart it another day with literally zero work.
 
+- clicking on the volume button should mute the audio. clicking it again should restore the audio to the previous volume.
+
 ## Player
 
 - [x] Hide the top menu and sidebar while playing
