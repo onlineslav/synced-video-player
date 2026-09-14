@@ -48,6 +48,14 @@ button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+button.primary:not(:disabled):hover {
+  background: #6554e6;
+  border-color: #6554e6;
 }
 
 button.ghost {
