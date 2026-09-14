@@ -15,7 +15,7 @@ npm run dist:mac                 # .dmg in dist/, only works on macOS (CI builds
 ```
 
 - `renderer/bundle.js` is what the window loads. Re-run `npm run bundle` after editing anything in `renderer/` or `shared/`.
-- If `ELECTRON_RUN_AS_NODE=1` is set in the environment (it is inside VS Code extension hosts), Electron runs as plain Node and `require('electron')` fails. Unset it before `npm start`.
+- VS Code terminals set `ELECTRON_RUN_AS_NODE=1`, which makes Electron run as plain Node so `require('electron')` fails. `npm start` goes through `scripts/electron.js`, which removes it; run Electron directly (`electron .`) and you have to unset it yourself.
 
 ## Architecture
 

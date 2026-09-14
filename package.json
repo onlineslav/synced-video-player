@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "bundle": "esbuild renderer/app.js --bundle --format=iife --target=chrome130 --outfile=renderer/bundle.js",
-    "start": "npm run bundle && electron .",
+    "start": "npm run bundle && node scripts/electron.js .",
     "test": "node --test",
     "dist:win": "npm run bundle && electron-builder --win",
     "dist:mac": "npm run bundle && electron-builder --mac"
