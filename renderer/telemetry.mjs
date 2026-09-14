@@ -35,6 +35,8 @@ export function readStats(report) {
       jitterMs: Math.round((inbound.jitter || 0) * 1000),
       fps: inbound.framesPerSecond || 0,
       height: inbound.frameHeight || 0,
+      jitterBufferDelay: inbound.jitterBufferDelay || 0,
+      jitterBufferEmittedCount: inbound.jitterBufferEmittedCount || 0,
     },
     outbound: outbound && {
       fps: outbound.framesPerSecond || 0,
@@ -49,10 +51,13 @@ export function inboundDelta(previous, next) {
   if (!previous || !next || previous.ssrc !== next.ssrc || next.packetsReceived < previous.packetsReceived) return null
   const received = next.packetsReceived - previous.packetsReceived
   const lost = Math.max(0, next.packetsLost - previous.packetsLost)
+  const emitted = next.jitterBufferEmittedCount - previous.jitterBufferEmittedCount
   return {
     lossPct: received + lost > 0 ? (100 * lost) / (received + lost) : 0,
     freezes: next.freezeCount - previous.freezeCount,
     droppedFrames: next.framesDropped - previous.framesDropped,
+    // How long frames recently waited in the jitter buffer: how far the picture trails the host.
+    delayMs: emitted > 0 ? Math.round((1000 * (next.jitterBufferDelay - previous.jitterBufferDelay)) / emitted) : null,
   }
 }
 

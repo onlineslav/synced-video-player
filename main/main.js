@@ -47,6 +47,7 @@ function registerIpc() {
   ipcMain.handle('session:start', (_event, options) => media.startSession(options))
   ipcMain.handle('session:pull', (_event, id) => media.pull(id))
   ipcMain.handle('session:stop', (_event, id) => media.stopSession(id))
+  ipcMain.handle('subtitle:cues', (_event, options) => media.subtitleCues(options))
   ipcMain.handle('net:ice-servers', () => loadIceServers(turnConfigPath()))
 }
 

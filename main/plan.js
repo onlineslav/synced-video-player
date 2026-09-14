@@ -194,11 +194,52 @@ function planSession({
   }
 }
 
+// Text subtitles are converted to WebVTT and drawn by each person's app, so everyone can pick
+// their own track. Image subtitles can only be burned into the stream (planSession).
+function subtitleExtractArgs(filePath, subtitle, charenc = null) {
+  const external = subtitle.kind === 'external'
+  return [
+    '-v', 'error', '-nostdin',
+    ...(charenc ? ['-sub_charenc', charenc] : []),
+    '-i', external ? subtitle.path : filePath,
+    '-map', `0:s:${external ? 0 : subtitle.subIndex}`,
+    '-f', 'webvtt',
+    'pipe:1',
+  ]
+}
+
+function parseVttTime(text) {
+  const match = text.match(/^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})$/)
+  return match ? Number(match[1] || 0) * 3600 + Number(match[2]) * 60 + Number(match[3]) + Number(match[4]) / 1000 : NaN
+}
+
+// ASS vector drawings ({\p1}m 0 0 l 100 0 …) come through ffmpeg's conversion as plain text.
+const isDrawing = (line) => /^m\s+-?[\d.]+\s+-?[\d.]+/.test(line) && /^[mnlbspc\d.\s-]+$/.test(line)
+
+function parseWebVtt(text) {
+  const cues = []
+  for (const block of text.replace(/\r/g, '').split(/\n{2,}/)) {
+    const lines = block.split('\n')
+    const at = lines.findIndex((line) => line.includes('-->'))
+    if (at < 0) continue
+    const [start, end] = lines[at].split('-->').map((part) => parseVttTime(part.trim().split(/\s+/)[0]))
+    const body = lines
+      .slice(at + 1)
+      .map((line) => line.replace(/\{[^}]*\}/g, '').trim())
+      .filter((line) => line && !isDrawing(line))
+      .join('\n')
+    if (end > start && body) cues.push({start, end, text: body})
+  }
+  return cues.sort((a, b) => a.start - b.start)
+}
+
 module.exports = {
   ENCODER_ARGS,
   escapeFilterValue,
   externalSubtitle,
   isSubtitleSidecar,
+  parseWebVtt,
   planSession,
+  subtitleExtractArgs,
   summarizeProbe,
 }

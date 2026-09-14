@@ -1,9 +1,9 @@
 # Synced Video Player
 
-Watch a video file together from two computers (Windows or Mac, in any combination). One person hosts and streams the file. Either person can play, pause, seek, or switch audio and subtitle tracks, and both see the change.
+Watch a video file together from two computers (Windows or Mac, in any combination). One person hosts and streams the file. Either person can play, pause, seek, or switch the audio track, and both see the change.
 
 - Plays almost anything VLC plays (MKV, HEVC, AV1, AC3/DTS/TrueHD audio, XviD, 10-bit, HDR), because ffmpeg is bundled.
-- Subtitles: tracks inside the file, `.srt`/`.ass`/`.ssa`/`.vtt` files next to the video, or any subtitle file you drop in. They are drawn into the picture, so the viewer sees them too.
+- Subtitles: tracks inside the file, `.srt`/`.ass`/`.ssa`/`.vtt` files next to the video, or any subtitle file you drop in. Each person picks their own track, or none. Image subtitles (Blu-ray PGS, DVD VobSub) can only be drawn into the picture, so those show for everyone.
 - No accounts, no port forwarding, no servers to run.
 
 ## Using it

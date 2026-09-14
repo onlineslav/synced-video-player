@@ -3,7 +3,7 @@
 const {execFile, spawn} = require('node:child_process')
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const {ENCODER_ARGS, externalSubtitle, isSubtitleSidecar, planSession, summarizeProbe} = require('./plan')
+const {ENCODER_ARGS, externalSubtitle, isSubtitleSidecar, parseWebVtt, planSession, subtitleExtractArgs, summarizeProbe} = require('./plan')
 
 // Binaries can't execute from inside the asar archive; electron-builder unpacks them beside it.
 const unpacked = (p) => p.replace('app.asar', 'app.asar.unpacked')
@@ -160,4 +160,37 @@ function stopAll() {
   for (const id of [...sessions.keys()]) stopSession(id)
 }
 
-module.exports = {detectCapabilities, probe, pull, startSession, stopAll, stopSession}
+const cueCache = new Map()
+
+// Cues [{start, end, text}] for a text subtitle track, or for any subtitle file when filePath is null.
+function subtitleCues({filePath = null, subtitleId}) {
+  const key = `${filePath}|${subtitleId}`
+  if (!cueCache.has(key)) {
+    const cues = readCues(filePath, subtitleId)
+    cueCache.set(key, cues)
+    cues.catch(() => cueCache.delete(key))
+  }
+  return cueCache.get(key)
+}
+
+async function readCues(filePath, subtitleId) {
+  let subtitle
+  if (subtitleId.startsWith('external:')) {
+    subtitle = externalSubtitle(subtitleId.slice('external:'.length))
+  } else {
+    const media = probeCache.get(filePath) || (await probe(filePath))
+    subtitle = media.subtitles.find((s) => s.id === subtitleId)
+  }
+  if (!subtitle || subtitle.image) throw new Error('That subtitle track is not text.')
+  const read = (charenc) => run(FFMPEG, subtitleExtractArgs(filePath, subtitle, charenc)).then(parseWebVtt)
+  // Older .srt files are often Windows-1252 rather than UTF-8; ffmpeg drops or rejects those lines.
+  return read().then(
+    (cues) => (subtitle.kind === 'external' && !cues.length ? read('CP1252') : cues),
+    (err) => {
+      if (subtitle.kind !== 'external') throw err
+      return read('CP1252')
+    },
+  )
+}
+
+module.exports = {detectCapabilities, probe, pull, startSession, stopAll, stopSession, subtitleCues}

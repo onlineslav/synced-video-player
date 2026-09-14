@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('api', {
   startSession: (options) => ipcRenderer.invoke('session:start', options),
   pull: (sessionId) => ipcRenderer.invoke('session:pull', sessionId),
   stopSession: (sessionId) => ipcRenderer.invoke('session:stop', sessionId),
+  subtitleCues: (options) => ipcRenderer.invoke('subtitle:cues', options),
   iceServers: () => ipcRenderer.invoke('net:ice-servers'),
 })

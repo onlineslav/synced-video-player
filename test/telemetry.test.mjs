@@ -45,7 +45,9 @@ test('readStats picks the live streams and the active connection', () => {
 test('inboundDelta measures loss and ignores replaced streams', () => {
   const a = {ssrc: 2, packetsReceived: 100, packetsLost: 0, freezeCount: 0, framesDropped: 0}
   const b = {ssrc: 2, packetsReceived: 190, packetsLost: 10, freezeCount: 1, framesDropped: 2}
-  assert.deepEqual(inboundDelta(a, b), {lossPct: 10, freezes: 1, droppedFrames: 2})
+  assert.deepEqual(inboundDelta(a, b), {lossPct: 10, freezes: 1, droppedFrames: 2, delayMs: null})
+  const delay = inboundDelta({...a, jitterBufferDelay: 10, jitterBufferEmittedCount: 1000}, {...b, jitterBufferDelay: 22, jitterBufferEmittedCount: 1048})
+  assert.equal(delay.delayMs, 250)
   assert.equal(inboundDelta(a, {...b, ssrc: 3}), null)
   assert.ok(isTroubled(inboundDelta(a, b), 5))
   assert.ok(!isTroubled({lossPct: 1, freezes: 0}, 10))

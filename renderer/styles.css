@@ -248,6 +248,32 @@ button.ghost {
   display: block;
 }
 
+.stage {
+  container-type: size;
+}
+
+.captions {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: 7%;
+  text-align: center;
+  pointer-events: none;
+  color: #fff;
+  font-size: clamp(16px, 4.6cqh, 60px);
+  font-weight: 600;
+  line-height: 1.25;
+  text-shadow:
+    0 0 3px #000,
+    0 0 3px #000,
+    1px 2px 3px #000;
+  transition: bottom 0.25s;
+}
+
+.room:not(.idle) .captions {
+  bottom: max(7%, 76px);
+}
+
 .empty {
   position: absolute;
   inset: 0;

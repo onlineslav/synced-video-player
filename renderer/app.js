@@ -11,6 +11,7 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {captionHtml} from './subtitles.mjs'
 import {
   MIN_BUFFER_MS,
   adaptBuffer,
@@ -30,6 +31,9 @@ const MAX_STREAM_WIDTH = 1920
 const TELEMETRY_INTERVAL_MS = 2000
 const SUBTITLE_FILE = /\.(srt|ass|ssa|vtt)$/i
 const LOAD_SUBTITLE = '__load__'
+const LOCAL_SUBTITLE = 'local:' // a subtitle file only this person loaded
+const CUES_TIMEOUT_MS = 180_000 // reading a track out of a large file can take a while
+const DECODE_DELAY_MS = 40
 const CHROME_IDLE_MS = 2500
 
 // The host's encoder follows hints in the viewer's SDP; both sides run this app.
@@ -82,6 +86,7 @@ const ui = {
   stage: $('stage'),
   localVideo: $('local-video'),
   remoteVideo: $('remote-video'),
+  captions: $('captions'),
   emptyText: $('empty-text'),
   spinner: $('spinner'),
   toast: $('toast'),
@@ -118,6 +123,10 @@ const blankSession = () => ({
   buffer: {bufferMs: MIN_BUFFER_MS, calmMs: 0},
   epoch: 0, // host: bumps whenever ffmpeg restarts, so viewers can tell a restart from a freeze
   steady: {since: null, epoch: 0}, // viewer: when the host's playback last became uninterrupted
+  playoutDelayMs: null, // viewer: how far the picture trails the host's clock
+  cuesAction: null,
+  captions: {mediaKey: null, id: null, cues: [], token: null}, // this person's own text subtitles
+  localSubtitles: [], // subtitle files only this person loaded
 })
 let session = blankSession()
 
@@ -133,7 +142,9 @@ async function enterRoom(code) {
     stateAction: room.makeAction('state'),
     commandAction: room.makeAction('command'),
     telemetryAction: room.makeAction('telemetry'),
+    cuesAction: room.makeAction('cues', {kind: 'request'}),
   }
+  session.cuesAction.onRequest = ({id}) => hostCues(id)
 
   room.onPeerJoin = (peerId) => {
     session.peers.add(peerId)
@@ -294,7 +305,7 @@ function hostState() {
     transcoding: player.transcoding,
     audio: (media?.audio || []).map((a) => ({value: String(a.index), label: a.label})),
     audioSelected: player.audioIndex == null ? '' : String(player.audioIndex),
-    subtitles: (media?.subtitles || []).map((s) => ({value: s.id, label: s.label})),
+    subtitles: (media?.subtitles || []).map((s) => ({value: s.id, label: s.label, image: s.image, isDefault: s.isDefault})),
     subtitleSelected: player.subtitleId || '',
     sender: session.link?.sender || null,
     epoch: session.epoch,
@@ -333,6 +344,7 @@ async function sampleConnection() {
     const measured = inboundDelta(session.lastInbound, stats.inbound)
     const delta = measured && !steady ? {...measured, freezes: 0, droppedFrames: 0} : measured
     session.lastInbound = stats.inbound
+    if (measured?.delayMs != null) session.playoutDelayMs = measured.delayMs
     session.buffer = adaptBuffer(session.buffer, isTroubled(delta, steady ? stats.inbound.jitterMs : 0), TELEMETRY_INTERVAL_MS)
     applyViewerBuffer(pc)
     const receiver = {
@@ -364,7 +376,7 @@ function applyCommand(cmd, value) {
   else if (cmd === 'pause') video.pause()
   else if (cmd === 'seek') player.seek(Number(value))
   else if (cmd === 'audio') player.setAudio(value === '' ? null : Number(value))
-  else if (cmd === 'subtitle') player.setSubtitle(value || null)
+  else if (cmd === 'subtitle' && (!value || player.media.subtitles.some((s) => s.id === value && s.image))) player.setSubtitle(value || null)
   broadcastState()
 }
 
@@ -402,6 +414,68 @@ function viewerTime() {
   if (!r) return 0
   const elapsed = r.playing && !r.buffering ? (performance.now() - r.receivedAt) / 1000 : 0
   return Math.min(r.time + elapsed, r.duration || Infinity)
+}
+
+// ---------- Subtitles ----------
+// Text subtitles are drawn by each person's own app, so everyone picks their own track (or none).
+// Image subtitles (PGS, VobSub) can only be burned into the stream, so they show for everyone.
+
+function hostCues(id) {
+  if (!isHost() || !player.media?.subtitles.some((s) => s.id === id && !s.image)) throw new Error('Subtitle track not found')
+  return window.api.subtitleCues({filePath: player.media.filePath, subtitleId: id})
+}
+
+function loadCues(id) {
+  if (id.startsWith(LOCAL_SUBTITLE)) return window.api.subtitleCues({subtitleId: `external:${id.slice(LOCAL_SUBTITLE.length)}`})
+  if (isHost()) return hostCues(id)
+  return session.cuesAction.request({id}, {target: session.hostId, timeoutMs: CUES_TIMEOUT_MS})
+}
+
+async function selectSubtitle(id) {
+  const token = Symbol('captions')
+  session.captions = {...session.captions, id: id || null, cues: [], token}
+  if (!id) return
+  const captions = session.captions
+  const slow = setTimeout(() => toast('Loading subtitles…'), 400)
+  try {
+    const cues = await loadCues(id)
+    if (captions.token === token) captions.cues = cues
+  } catch (err) {
+    if (captions.token !== token) return
+    Object.assign(captions, {id: null, token: null})
+    toast(`Couldn't load subtitles: ${errorMessage(err)}`, true)
+  } finally {
+    clearTimeout(slow)
+  }
+}
+
+// A new video starts everyone on its default text track, if it has one.
+function syncCaptionsToMedia(state) {
+  const key = state && !state.loading ? `${state.hostId}:${state.claimedAt}` : null
+  if (key === session.captions.mediaKey) return
+  session.captions.mediaKey = key
+  session.localSubtitles = []
+  selectSubtitle(state?.subtitles?.find((s) => s.isDefault && !s.image)?.value)
+}
+
+function addSubtitleFile(filePath) {
+  if (session.role === 'idle') return toast('Open a video first')
+  if (isHost()) return selectSubtitle(player.addExternalSubtitle(filePath))
+  const value = `${LOCAL_SUBTITLE}${filePath}`
+  if (!session.localSubtitles.some((s) => s.value === value)) {
+    session.localSubtitles.push({value, label: filePath.split(/[\\/]/).pop()})
+  }
+  selectSubtitle(value)
+}
+
+// The viewer's picture trails the host's clock by the jitter buffer, so captions wait for it.
+let captionsShown = ''
+function drawCaptions() {
+  requestAnimationFrame(drawCaptions)
+  const {cues} = session.captions
+  const delayMs = isHost() ? 0 : (session.playoutDelayMs ?? session.buffer.bufferMs) + DECODE_DELAY_MS
+  const html = cues.length && session.role !== 'idle' ? captionHtml(cues, currentTime() - delayMs / 1000) : ''
+  if (html !== captionsShown) ui.captions.innerHTML = captionsShown = html
 }
 
 // ---------- Shared controls ----------
@@ -484,9 +558,14 @@ function render() {
   const audio = state?.audio || []
   fillSelect(ui.audio, audio, state?.audioSelected ?? '')
   ui.audio.hidden = audio.length <= 1
-  const subtitles = [{value: '', label: 'Subtitles off'}, ...(state?.subtitles || [])]
-  if (host) subtitles.push({value: LOAD_SUBTITLE, label: 'Load subtitle file…'})
-  fillSelect(ui.subtitles, subtitles, state?.subtitleSelected ?? '')
+  syncCaptionsToMedia(role === 'idle' ? null : state)
+  const subtitles = [
+    {value: '', label: 'Subtitles off'},
+    ...(state?.subtitles || []).map((s) => ({value: s.value, label: s.image ? `${s.label} · for everyone` : s.label})),
+    ...session.localSubtitles,
+  ]
+  if (ready) subtitles.push({value: LOAD_SUBTITLE, label: 'Load subtitle file…'})
+  fillSelect(ui.subtitles, subtitles, session.captions.id ?? state?.subtitleSelected ?? '')
   ui.subtitles.hidden = subtitles.length <= 1
 
   if (!isPlaying()) ui.room.classList.remove('idle')
@@ -548,10 +627,18 @@ ui.seek.addEventListener('change', () => {
 ui.audio.addEventListener('change', () => control('audio', ui.audio.value))
 
 ui.subtitles.addEventListener('change', async () => {
-  if (ui.subtitles.value !== LOAD_SUBTITLE) return control('subtitle', ui.subtitles.value)
-  ui.subtitles.value = player.subtitleId || ''
-  const filePath = await window.api.chooseSubtitle()
-  if (filePath && isHost()) control('subtitle', player.addExternalSubtitle(filePath))
+  const value = ui.subtitles.value
+  const state = isHost() ? hostState() : session.remote
+  if (value === LOAD_SUBTITLE) {
+    ui.subtitles.value = session.captions.id ?? state?.subtitleSelected ?? ''
+    const filePath = await window.api.chooseSubtitle()
+    if (filePath) addSubtitleFile(filePath)
+    return
+  }
+  const image = Boolean(state?.subtitles?.some((s) => s.value === value && s.image))
+  // Burned-in subtitles are shared, so only touch them when picking one or turning subtitles off.
+  if (image || (!value && state?.subtitleSelected)) control('subtitle', value)
+  selectSubtitle(image ? null : value)
 })
 
 function setVolume(volume) {
@@ -630,13 +717,13 @@ ui.stage.addEventListener('drop', (event) => {
   if (!file) return
   const filePath = window.api.pathForFile(file)
   if (!SUBTITLE_FILE.test(filePath)) return hostFile(filePath)
-  if (isHost()) control('subtitle', player.addExternalSubtitle(filePath))
-  else toast('Only the person hosting can add subtitle files')
+  addSubtitleFile(filePath)
 })
 
 window.addEventListener('beforeunload', () => session.room?.leave())
 
 setInterval(render, 250)
+requestAnimationFrame(drawCaptions)
 setInterval(() => sampleConnection().catch(() => {}), TELEMETRY_INTERVAL_MS)
 setInterval(() => {
   if (!isHost()) return

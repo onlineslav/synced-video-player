@@ -50,7 +50,8 @@ export class StreamPlayer extends EventTarget {
     if (generation !== this.generation) return false
     this.media = media
     this.audioIndex = (media.audio.find((a) => a.isDefault) || media.audio[0])?.index ?? null
-    this.subtitleId = media.subtitles.find((s) => s.isDefault)?.id ?? null
+    // Only image subtitles are burned in; text ones are drawn by each person's app.
+    this.subtitleId = media.subtitles.find((s) => s.isDefault && s.image)?.id ?? null
     this.forceTranscode = false
     await this.attachSource()
     if (generation !== this.generation) return false

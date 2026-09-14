@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const {escapeFilterValue, isSubtitleSidecar, planSession, summarizeProbe} = require('../main/plan')
+const {escapeFilterValue, isSubtitleSidecar, parseWebVtt, planSession, subtitleExtractArgs, summarizeProbe} = require('../main/plan')
 
 const probe = {
   format: {duration: '5400.5', tags: {title: 'Movie'}},
@@ -68,6 +68,37 @@ test('overlays image subtitles through filter_complex', () => {
 
 test('escapeFilterValue escapes for both filter-graph levels', () => {
   assert.equal(escapeFilterValue("a, [b] 'c'; d:e"), String.raw`a\, \[b\] \\\'c\\\'\; d\\:e`)
+})
+
+test('subtitleExtractArgs reads an embedded track or a whole subtitle file as WebVTT', () => {
+  const embedded = subtitleExtractArgs('C:\\Movies\\movie.mkv', media.subtitles[0])
+  assert.deepEqual(embedded.slice(3), ['-i', 'C:\\Movies\\movie.mkv', '-map', '0:s:1', '-f', 'webvtt', 'pipe:1'])
+  const external = subtitleExtractArgs('movie.mkv', media.subtitles[2], 'CP1252')
+  assert.deepEqual(external.slice(3, 9), ['-sub_charenc', 'CP1252', '-i', 'C:\\Movies\\movie.en.srt', '-map', '0:s:0'])
+})
+
+test('parseWebVtt keeps timed text and drops headers, ASS overrides and drawings', () => {
+  const vtt = [
+    'WEBVTT',
+    '',
+    'NOTE a comment',
+    '',
+    '1',
+    '01:00:02.500 --> 01:00:04.000 align:start',
+    '{\\an8}<i>Top</i>',
+    'second line',
+    '',
+    '00:01.000 --> 00:03.000',
+    'm 0 0 l 100 0 100 100',
+    '',
+    '00:00.250 --> 00:01.000',
+    'First',
+    '',
+  ].join('\r\n')
+  assert.deepEqual(parseWebVtt(vtt), [
+    {start: 0.25, end: 1, text: 'First'},
+    {start: 3602.5, end: 3604, text: '<i>Top</i>\nsecond line'},
+  ])
 })
 
 test('isSubtitleSidecar matches subtitles named after the video', () => {
