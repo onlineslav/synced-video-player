@@ -35,4 +35,4 @@
 - [x] Add friends by username
 - [ ] Set or upload a profile photo
 - [x] See which friends are online and hosting rooms
-- [ ] Ask to join a friend's room
+- [x] Ask to join a friend's room

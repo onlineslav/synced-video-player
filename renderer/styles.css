@@ -120,6 +120,44 @@ button.ghost {
   color: var(--danger);
 }
 
+.friend-error.notice {
+  color: var(--muted);
+}
+
+.friend-ask {
+  flex: none;
+}
+
+/* A friend asking to join; stays visible while the rest of the chrome hides. */
+.join-requests {
+  position: absolute;
+  top: 120px;
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transform: translateX(-50%);
+  transition: top 0.25s;
+}
+
+.room.idle .join-requests {
+  top: 60px;
+}
+
+.join-request {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: rgba(22, 22, 29, 0.95);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: default;
+}
+
 .friend-list {
   list-style: none;
   margin: 0;

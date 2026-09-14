@@ -105,6 +105,7 @@ const ui = {
   friendRequests: $('friend-requests'),
   friendList: $('friend-list'),
   friendsEmpty: $('friends-empty'),
+  joinRequests: $('join-requests'),
   create: $('create'),
   joinForm: $('join-form'),
   joinCode: $('join-code'),
@@ -257,6 +258,7 @@ async function leaveRoom() {
   player.close()
   unpublishStream()
   ui.remoteVideo.srcObject = null
+  ui.joinRequests.replaceChildren()
   session = blankSession()
   setRole('idle')
   ui.room.hidden = true
@@ -509,6 +511,7 @@ function syncPresence() {
   if (!friendNetwork.identity || status === sharedStatus) return
   sharedStatus = status
   friendNetwork.updateProfile(myProfile())
+  renderFriends() // "Ask to join" only shows while you're not in a room
 }
 
 async function loadIdentity() {
@@ -674,11 +677,55 @@ function renderFriends() {
       remove.addEventListener('click', () => {
         if (confirm(`Remove ${label} from your friends?`)) friendNetwork.remove(friend.username)
       })
-      row.append(element('span', 'avatar', label[0].toUpperCase()), main, remove)
+      row.append(element('span', 'avatar', label[0].toUpperCase()), main)
+      if (friend.online && friend.status?.inRoom && !session.room) {
+        const ask = element('button', 'small friend-ask', friend.asked ? 'Asked…' : 'Ask to join')
+        ask.disabled = friend.asked
+        ask.addEventListener('click', () => showFriendNotice(friendNetwork.askToJoin(friend.username)))
+        row.append(ask)
+      }
+      row.append(remove)
       return row
     }),
   )
   ui.friendsEmpty.hidden = friends.length + requests.length > 0
+}
+
+function showFriendNotice(message, {error = true} = {}) {
+  ui.friendError.textContent = message || ''
+  ui.friendError.hidden = !message
+  ui.friendError.classList.toggle('notice', !error)
+}
+
+// A friend asks to join: you can only let them into a room you're in.
+function receiveJoinAsk({username, name}) {
+  if (!session.room) return friendNetwork.answerJoin(username, null)
+  if ([...ui.joinRequests.children].some((card) => card.dataset.username === username)) return
+  const card = element('div', 'join-request')
+  card.dataset.username = username
+  const answer = (code) => {
+    card.remove()
+    friendNetwork.answerJoin(username, code)
+  }
+  const letIn = element('button', 'primary small', 'Let in')
+  letIn.addEventListener('click', () => answer(session.code))
+  const notNow = element('button', 'ghost small', 'Not now')
+  notNow.addEventListener('click', () => answer(null))
+  card.append(element('span', null, `${name} wants to join`), letIn, notNow)
+  ui.joinRequests.append(card)
+  setTimeout(() => card.remove(), 120_000)
+}
+
+async function receiveJoinInvite({name, code}) {
+  const roomCode = normalizeRoomCode(code)
+  if (roomCode.length !== 8 || session.code === roomCode) return
+  if (session.room) {
+    if (!confirm(`${name} let you in. Leave this room and join theirs?`)) return
+    await leaveRoom()
+  }
+  showFriendNotice(null)
+  await enterRoom(roomCode)
+  toast(`Joined ${name}'s room`)
 }
 
 // ---------- People ----------
@@ -1128,13 +1175,15 @@ ui.welcomeForm.addEventListener('submit', async (event) => {
 })
 
 friendNetwork.addEventListener('change', renderFriends)
+friendNetwork.addEventListener('join-ask', ({detail}) => receiveJoinAsk(detail))
+friendNetwork.addEventListener('join-invite', ({detail}) => receiveJoinInvite(detail))
+friendNetwork.addEventListener('join-declined', ({detail}) => showFriendNotice(`${detail.name} can't let you in right now.`, {error: false}))
 renderFriends()
 
 ui.addFriend.addEventListener('submit', (event) => {
   event.preventDefault()
   const error = identity ? friendNetwork.add(ui.friendUsername.value) : 'Still starting up, try again in a moment.'
-  ui.friendError.textContent = error || ''
-  ui.friendError.hidden = !error
+  showFriendNotice(error)
   if (!error) ui.friendUsername.value = ''
 })
 

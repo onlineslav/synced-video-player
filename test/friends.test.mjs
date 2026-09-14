@@ -128,7 +128,7 @@ test('a peer claiming someone else’s username is ignored', async () => {
     profile.send({name: 'Totally Bob'}, {target: peerId})
   }
   await new Promise((resolve) => setTimeout(resolve, 100))
-  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false, status: null}])
+  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false, status: null, asked: false}])
 })
 
 test('friends see each other online, in a room and hosting, and then offline', async () => {
@@ -153,6 +153,46 @@ test('friends see each other online, in a room and hosting, and then offline', a
   await until(() => !bob.friends.list()[0].online, 'offline')
   assert.equal(bob.friends.list()[0].status, null)
   assert.equal(presenceText(bob.friends.list()[0]), 'Offline')
+})
+
+test('asking to join a room: only an answer to your own ask counts', async () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bob = await person(net, 'b', 'Bob')
+  alice.friends.add(bob.identity.username)
+  bob.friends.add(alice.identity.username)
+  await until(() => alice.friends.list()[0]?.name === 'Bob' && bob.friends.list()[0]?.name === 'Alice', 'friends')
+
+  const events = []
+  for (const [who, {friends}] of [['alice', alice], ['bob', bob]]) {
+    for (const type of ['join-ask', 'join-invite', 'join-declined']) friends.addEventListener(type, ({detail}) => events.push([who, type, detail]))
+  }
+
+  bob.friends.answerJoin(alice.identity.username, 'ABCDEFGH')
+  await sleep(50)
+  assert.deepEqual(events, [], 'an invite nobody asked for is ignored')
+
+  assert.equal(alice.friends.askToJoin(bob.identity.username), null)
+  assert.ok(alice.friends.list()[0].asked)
+  await until(() => events.length === 1, 'ask')
+  assert.deepEqual(events[0], ['bob', 'join-ask', {username: alice.identity.username, name: 'Alice'}])
+  bob.friends.answerJoin(alice.identity.username, 'ABCDEFGH')
+  await until(() => events.length === 2, 'invite')
+  assert.deepEqual(events[1], ['alice', 'join-invite', {username: bob.identity.username, name: 'Bob', code: 'ABCDEFGH'}])
+  assert.ok(!alice.friends.list()[0].asked)
+
+  alice.friends.askToJoin(bob.identity.username)
+  await until(() => events.length === 3, 'second ask')
+  bob.friends.answerJoin(alice.identity.username, null)
+  bob.friends.answerJoin(alice.identity.username, 'ABCDEFGH')
+  await until(() => events.length === 4, 'declined')
+  await sleep(50)
+  assert.deepEqual(events.slice(3).map(([who, type]) => [who, type]), [['alice', 'join-declined']], 'a second answer is ignored')
+
+  assert.equal(alice.friends.askToJoin('nobody#0000-0000'), "They're offline.")
+  alice.friends.stop()
+  bob.friends.stop()
 })
 
 test('presenceText explains friends who have not added you back yet', () => {

@@ -6,6 +6,7 @@ import {normalizeUsername, sign, verifySigned} from './identity.mjs'
 import {cleanDisplayName, cleanText} from './profile.mjs'
 
 const MAX_TITLE_LENGTH = 80
+const ASK_TIMEOUT_MS = 120_000 // how long an ask to join waits for an answer
 
 export const inboxRoomId = (username) => `inbox:${username}`
 
@@ -42,6 +43,7 @@ export class FriendNetwork extends EventTarget {
     this.links = new Map() // roomId -> link
     this.online = new Map() // username -> {link, peerId}
     this.presence = new Map() // username -> cleanStatus(), from their latest profile
+    this.asks = new Map() // username -> expiry timer, while waiting to hear if you can join
   }
 
   start(identity, profile) {
@@ -66,8 +68,36 @@ export class FriendNetwork extends EventTarget {
   list() {
     return [...this.friends.values()].map((friend) => {
       const online = this.online.has(friend.username)
-      return {...friend, online, status: online ? this.presence.get(friend.username) || null : null}
+      const status = online ? this.presence.get(friend.username) || null : null
+      return {...friend, online, status, asked: this.asks.has(friend.username)}
     })
+  }
+
+  // Asks a friend who's in a room to let you in. Returns an error message, or null when sent.
+  askToJoin(username) {
+    const entry = this.online.get(username)
+    if (!entry) return "They're offline."
+    clearTimeout(this.asks.get(username))
+    const timer = setTimeout(() => this.forgetAsk(username), ASK_TIMEOUT_MS)
+    timer.unref?.()
+    this.asks.set(username, timer)
+    entry.link.actions.join.send({type: 'ask'}, {target: entry.peerId}).catch(() => {})
+    this.changed()
+    return null
+  }
+
+  // Answers a friend's ask with your room code, or null for no.
+  answerJoin(username, code) {
+    const entry = this.online.get(username)
+    const answer = code ? {type: 'invite', code} : {type: 'declined'}
+    entry?.link.actions.join.send(answer, {target: entry.peerId}).catch(() => {})
+  }
+
+  forgetAsk(username) {
+    clearTimeout(this.asks.get(username))
+    const asked = this.asks.delete(username)
+    if (asked) this.changed()
+    return asked
   }
 
   requestList() {
@@ -126,7 +156,7 @@ export class FriendNetwork extends EventTarget {
     const config = {appId: this.appId, password: roomId, ...(this.turnConfig.length && {turnConfig: this.turnConfig})}
     const room = this.joinRoom(config, roomId)
     const link = {roomId, ...purpose, room, peers: new Map(), early: new Map(), actions: {}}
-    for (const name of ['hello', 'profile', 'request', 'ack']) link.actions[name] = room.makeAction(name)
+    for (const name of ['hello', 'profile', 'request', 'ack', 'join']) link.actions[name] = room.makeAction(name)
     this.links.set(roomId, link)
 
     room.onPeerJoin = (peerId) => this.sendHello(link, peerId)
@@ -173,6 +203,16 @@ export class FriendNetwork extends EventTarget {
       }
       link.actions.ack.send({}, {target: peerId}).catch(() => {})
     })
+    link.actions.join.onMessage = onVerified((message, username) => {
+      const friend = this.friends.get(username)
+      if (link.kind !== 'pair' || username !== link.username || !friend?.confirmed) return
+      const detail = {username, name: friend.name || username}
+      if (message?.type === 'ask') this.emit('join-ask', detail)
+      // Only an answer to your own ask counts, so nobody can pull you into a room.
+      else if (message?.type === 'invite' && typeof message.code === 'string' && this.forgetAsk(username)) {
+        this.emit('join-invite', {...detail, code: message.code})
+      } else if (message?.type === 'declined' && this.forgetAsk(username)) this.emit('join-declined', detail)
+    })
     link.actions.ack.onMessage = onVerified((_ack, username) => {
       const friend = this.friends.get(username)
       if (link.kind !== 'request' || username !== link.username || !friend) return
@@ -194,6 +234,8 @@ export class FriendNetwork extends EventTarget {
   goOffline(username) {
     this.online.delete(username)
     this.presence.delete(username)
+    clearTimeout(this.asks.get(username))
+    this.asks.delete(username)
   }
 
   async sendHello(link, peerId) {
@@ -228,5 +270,9 @@ export class FriendNetwork extends EventTarget {
 
   changed() {
     this.dispatchEvent(new Event('change'))
+  }
+
+  emit(type, detail) {
+    this.dispatchEvent(new CustomEvent(type, {detail}))
   }
 }
