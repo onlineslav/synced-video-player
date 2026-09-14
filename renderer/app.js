@@ -16,6 +16,7 @@ import {
   MIN_BUFFER_MS,
   adaptBuffer,
   describeLink,
+  describePeer,
   inboundDelta,
   isSteady,
   isTroubled,
@@ -81,6 +82,9 @@ const ui = {
   linkWarningTip: $('link-warning-tip'),
   title: $('title'),
   role: $('role'),
+  peopleToggle: $('people-toggle'),
+  peopleCount: $('people-count'),
+  people: $('people'),
   openButtons: document.querySelectorAll('[data-open-video]'),
   leave: $('leave'),
   stage: $('stage'),
@@ -110,6 +114,8 @@ const blankSession = () => ({
   commandAction: null,
   peers: new Set(),
   peerStreams: new Map(),
+  people: new Map(), // peerId -> {name, rttMs, relayed, receiver}
+  profileAction: null,
   role: 'idle', // 'idle' | 'host' | 'viewer'
   hostId: null,
   claimedAt: 0,
@@ -143,11 +149,18 @@ async function enterRoom(code) {
     commandAction: room.makeAction('command'),
     telemetryAction: room.makeAction('telemetry'),
     cuesAction: room.makeAction('cues', {kind: 'request'}),
+    profileAction: room.makeAction('profile'),
   }
   session.cuesAction.onRequest = ({id}) => hostCues(id)
+  session.profileAction.onMessage = (profile, {peerId}) => {
+    if (!session.peers.has(peerId)) return
+    person(peerId).name = String(profile?.name || '').slice(0, MAX_NAME_LENGTH) || null
+    render()
+  }
 
   room.onPeerJoin = (peerId) => {
     session.peers.add(peerId)
+    session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
     toast('Friend connected')
     if (session.role === 'host') {
       if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId})).then(tuneSenders, () => {})
@@ -159,6 +172,7 @@ async function enterRoom(code) {
   room.onPeerLeave = (peerId) => {
     session.peers.delete(peerId)
     session.peerStreams.delete(peerId)
+    session.people.delete(peerId)
     if (session.role === 'viewer' && peerId === session.hostId) {
       session.hostId = null
       session.remote = null
@@ -179,8 +193,9 @@ async function enterRoom(code) {
   session.commandAction.onMessage = ({cmd, value}) => {
     if (session.role === 'host') applyCommand(cmd, value)
   }
-  session.telemetryAction.onMessage = (receiver) => {
-    if (session.role !== 'host') return
+  session.telemetryAction.onMessage = (receiver, {peerId}) => {
+    if (session.role !== 'host' || !session.peers.has(peerId)) return
+    person(peerId).receiver = receiver
     session.link = {...session.link, receiver}
     render()
   }
@@ -308,6 +323,8 @@ function hostState() {
     subtitles: (media?.subtitles || []).map((s) => ({value: s.id, label: s.label, image: s.image, isDefault: s.isDefault})),
     subtitleSelected: player.subtitleId || '',
     sender: session.link?.sender || null,
+    // What each viewer reports receiving, so everyone's room list can show it.
+    viewers: Object.fromEntries([...session.people].filter(([, p]) => p.receiver).map(([id, p]) => [id, p.receiver])),
     epoch: session.epoch,
   }
 }
@@ -322,18 +339,27 @@ function applyViewerBuffer(pc) {
   }
 }
 
-// Every couple of seconds: measure the connection to the other person. Viewers also adapt
+// Every couple of seconds: measure the connection to everyone in the room. Viewers also adapt
 // their buffer and report what they're receiving so the host can see it.
 async function sampleConnection() {
-  const peerId = session.role === 'viewer' ? session.hostId : [...session.peers][0]
-  const pc = peerId && session.room?.getPeers()[peerId]
-  if (!pc) {
-    session.link = null
-    return
-  }
   const room = session.room
-  const stats = readStats(await pc.getStats())
+  if (!room) return
+  const pcs = room.getPeers()
+  const readings = new Map(
+    await Promise.all(Object.entries(pcs).map(async ([id, pc]) => [id, await pc.getStats().then(readStats, () => null)])),
+  )
   if (session.room !== room) return
+  for (const [id, stats] of readings) {
+    if (stats && session.peers.has(id)) Object.assign(person(id), {rttMs: stats.rttMs, relayed: stats.relayed})
+  }
+
+  const peerId = session.role === 'viewer' ? session.hostId : [...session.peers][0]
+  const stats = readings.get(peerId)
+  if (!stats) {
+    session.link = null
+    return render()
+  }
+  const pc = pcs[peerId]
   const base = {rttMs: stats.rttMs, relayed: stats.relayed}
 
   if (isHost()) {
@@ -395,6 +421,9 @@ function receiveState(state, peerId) {
   session.steady = nextSteady(session.steady, state, session.remote ? viewerTime() : state.time, now)
   session.hostId = state.hostId
   session.remote = {...state, receivedAt: now}
+  for (const [id, receiver] of Object.entries(state.viewers || {})) {
+    if (session.peers.has(id)) person(id).receiver = receiver
+  }
   if (session.role !== 'viewer') setRole('viewer')
   attachRemoteStream()
   render()
@@ -414,6 +443,64 @@ function viewerTime() {
   if (!r) return 0
   const elapsed = r.playing && !r.buffering ? (performance.now() - r.receivedAt) / 1000 : 0
   return Math.min(r.time + elapsed, r.duration || Infinity)
+}
+
+// ---------- People ----------
+
+const MAX_NAME_LENGTH = 40
+let myName = 'Me'
+const myProfile = () => ({name: myName})
+
+function person(peerId) {
+  if (!session.people.has(peerId)) session.people.set(peerId, {name: null, rttMs: null, relayed: false, receiver: null})
+  return session.people.get(peerId)
+}
+
+function element(tag, className, text) {
+  const node = document.createElement(tag)
+  if (className) node.className = className
+  if (text != null) node.textContent = text
+  return node
+}
+
+function renderPeople() {
+  const host = isHost()
+  const hostId = host ? selfId : session.hostId
+  const me = {id: selfId, self: true, name: myName, ...(host ? {sender: session.link?.sender} : {receiver: session.role === 'viewer' ? session.link?.receiver : null})}
+  const others = [...session.peers].map((id) => {
+    const p = person(id)
+    return {id, name: p.name, rttMs: p.rttMs, relayed: p.relayed, receiver: p.receiver, sender: id === hostId ? session.remote?.sender : null}
+  })
+  const rows = [me, ...others]
+    .map((row) => ({...row, host: row.id === hostId, stats: describePeer(row)}))
+    .sort((a, b) => b.host - a.host)
+
+  ui.peopleCount.textContent = String(rows.length)
+  const signature = JSON.stringify(rows.map(({name, self, host, stats}) => [name, self, host, stats]))
+  if (ui.people.dataset.signature === signature) return
+  ui.people.dataset.signature = signature
+  ui.people.replaceChildren(
+    ...rows.map(({name, self, host, stats}) => {
+      const shownName = name || 'Joining…'
+      const row = element('li', 'person')
+      if (stats.level) row.dataset.level = stats.level
+      const nameLine = element('div', 'person-name', shownName)
+      if (self) nameLine.append(element('span', 'person-tag', 'you'))
+      const statsLine = element('div', 'person-stats', [host ? 'Hosting' : null, stats.text].filter(Boolean).join(' · ') || ' ')
+      if (stats.detail) statsLine.title = stats.detail
+      const main = element('div', 'person-main')
+      main.append(nameLine, statsLine)
+      row.append(element('span', 'avatar', shownName.trim()[0]?.toUpperCase() || '?'), main)
+      return row
+    }),
+  )
+}
+
+function setPeopleOpen(open) {
+  ui.room.classList.toggle('people-open', open)
+  try {
+    localStorage.setItem('peopleOpen', open ? '1' : '0')
+  } catch {}
 }
 
 // ---------- Subtitles ----------
@@ -527,6 +614,7 @@ function render() {
   const peerCount = session.peers.size
   ui.peerStatus.textContent = peerCount ? 'Friend connected' : 'Waiting for your friend to join…'
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
+  renderPeople()
   const health = peerCount && session.link ? describeLink({selfRole: role, ...session.link}) : null
   ui.link.hidden = !health
   if (health) {
@@ -599,6 +687,18 @@ ui.code.addEventListener('click', async () => {
 })
 
 ui.leave.addEventListener('click', leaveRoom)
+
+ui.peopleToggle.addEventListener('click', () => setPeopleOpen(!ui.room.classList.contains('people-open')))
+try {
+  setPeopleOpen(localStorage.getItem('peopleOpen') !== '0')
+} catch {
+  setPeopleOpen(true)
+}
+
+window.api.userName().then((name) => {
+  if (name) myName = name.slice(0, MAX_NAME_LENGTH)
+  session.profileAction?.send(myProfile()).catch(() => {})
+})
 
 for (const button of ui.openButtons) {
   button.addEventListener('click', async () => {
@@ -688,7 +788,7 @@ document.addEventListener('keydown', (event) => {
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
 let chromeTimer = null
-const chromeInUse = () => Boolean(ui.room.querySelector('.topbar:hover, .controls:hover, select:focus'))
+const chromeInUse = () => Boolean(ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, select:focus'))
 function wakeChrome() {
   ui.room.classList.remove('idle')
   clearTimeout(chromeTimer)

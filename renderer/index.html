@@ -30,6 +30,10 @@
         <span id="link" class="link" data-level="good" hidden></span>
         <span id="title" class="title"></span>
         <span id="role" class="role"></span>
+        <button id="people-toggle" class="ghost people-toggle" title="People in the room">
+          <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 13c-3.3 0-7 1.6-7 4v3h14v-3c0-2.4-3.7-4-7-4zm7 0c-.4 0-.8 0-1.2.1 1.3.9 2.2 2.2 2.2 3.9v3h5v-3c0-2.2-3.2-4-6-4z" /></svg>
+          <span id="people-count">1</span>
+        </button>
         <button data-open-video>Open video</button>
         <button id="leave" class="ghost">Leave</button>
       </header>
@@ -67,6 +71,11 @@
           </button>
         </div>
       </div>
+
+      <aside id="sidebar" class="sidebar">
+        <h2>In the room</h2>
+        <ul id="people" class="people"></ul>
+      </aside>
     </section>
 
     <script src="bundle.js"></script>

@@ -3,7 +3,7 @@
 export const activeCues = (cues, time) => cues.filter((cue) => cue.start <= time && time < cue.end)
 
 const ALLOWED_TAGS = new Set(['b', 'i', 'u'])
-const ENTITIES = {amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', lrm: '‎', rlm: '‏'}
+const ENTITIES = {amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0', lrm: '\u200e', rlm: '\u200f'}
 const escapeHtml = (text) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 // WebVTT cue text to HTML, keeping bold, italic and underline and nothing else.

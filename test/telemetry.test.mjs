@@ -5,6 +5,7 @@ import {
   MIN_BUFFER_MS,
   adaptBuffer,
   describeLink,
+  describePeer,
   inboundDelta,
   isSteady,
   isTroubled,
@@ -75,4 +76,16 @@ test('describeLink explains what is limiting playback from each side', () => {
   assert.equal(dropping.level, 'poor')
   assert.match(dropping.detail, /Your friend's connection is dropping video \(8% packet loss\)/)
   assert.match(dropping.detail, /buffering 1\.00 s/)
+})
+
+test('describePeer summarizes each person in the room', () => {
+  assert.deepEqual(describePeer({self: true}), {level: null, text: '', detail: null}, 'nothing measured yet')
+
+  const viewer = describePeer({rttMs: 35, receiver: {height: 1080, fps: 23.97, lossPct: 3.4, freezes: 0, bufferMs: 250}})
+  assert.equal(viewer.text, '35 ms · 1080p24 · 3% loss')
+  assert.equal(viewer.level, 'fair')
+  assert.match(viewer.detail, /^Their connection is losing a few packets/)
+
+  const me = describePeer({self: true, sender: {height: 720, fps: 30, limit: 'bandwidth'}})
+  assert.deepEqual(me, {level: 'fair', text: '720p30', detail: 'Your upload speed is limiting picture quality.'})
 })

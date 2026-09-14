@@ -2,6 +2,10 @@
 
 - q: is there a way for the client to like... buffer/cache videos that the host uploads/plays so that if one client has shit internet, they don't get hickups, and the playback between host and client remain really well synced with no dropouts or delays or latency or whatever
 
+- it remembers where you closed it on the last file 
+
+- start lobby
+
 ## Player
 
 - [x] Hide the top menu and sidebar while playing
@@ -9,7 +13,7 @@
 
 ## Room
 
-- [ ] Show ping and connection telemetry beside each person's name
+- [x] Show ping and connection telemetry beside each person's name
 - [ ] Reactions
   - [ ] Air horn
   - [ ] Golf clap

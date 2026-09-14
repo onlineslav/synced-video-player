@@ -83,10 +83,9 @@ export function adaptBuffer(state, troubled, intervalMs) {
   return {bufferMs: Math.max(MIN_BUFFER_MS, state.bufferMs - SHRINK_STEP_MS), calmMs: 0}
 }
 
-// `sender` is the host's outgoing video, `receiver` what the viewer reports getting.
-export function describeLink({selfRole, rttMs, relayed, sender, receiver}) {
-  const host = selfRole === 'host' ? 'Your' : "Your friend's"
-  const viewer = selfRole === 'host' ? "Your friend's" : 'Your'
+// `sender` is the host's outgoing video, `receiver` what a viewer reports getting. `host` and
+// `viewer` say whose they are ("Your", "Your friend's").
+function assess({rttMs, relayed, sender, receiver}, host, viewer) {
   const notes = []
   let level = 'good'
   const flag = (severity, note) => {
@@ -109,6 +108,23 @@ export function describeLink({selfRole, rttMs, relayed, sender, receiver}) {
 
   const picture = receiver?.height ? receiver : sender
   const quality = picture?.height ? `${picture.height}p${picture.fps ? Math.round(picture.fps) : ''}` : null
-  const text = [rttMs != null ? `${rttMs} ms` : null, quality].filter(Boolean).join(' · ') || 'Measuring…'
-  return {level, text, detail: notes.join('\n')}
+  return {level, quality, detail: notes.join('\n')}
+}
+
+export function describeLink({selfRole, ...link}) {
+  const friend = "Your friend's"
+  const {level, quality, detail} = assess(link, selfRole === 'host' ? 'Your' : friend, selfRole === 'host' ? friend : 'Your')
+  const text = [link.rttMs != null ? `${link.rttMs} ms` : null, quality].filter(Boolean).join(' · ') || 'Measuring…'
+  return {level, text, detail}
+}
+
+// The stats beside one person's name: ping from you to them, and the picture they receive
+// (a viewer) or send (the host). Level and detail are null until something is measured.
+export function describePeer({self = false, rttMs = null, relayed = false, sender = null, receiver = null}) {
+  if (rttMs == null && !receiver?.height && !sender?.height) return {level: null, text: '', detail: null}
+  const whose = self ? 'Your' : 'Their'
+  const {level, quality, detail} = assess({rttMs, relayed, sender, receiver}, whose, whose)
+  const loss = receiver?.lossPct >= 1 ? `${Math.round(receiver.lossPct)}% loss` : null
+  const text = [rttMs != null ? `${rttMs} ms` : null, quality, loss].filter(Boolean).join(' · ')
+  return {level, text, detail}
 }
