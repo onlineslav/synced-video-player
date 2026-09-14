@@ -120,7 +120,8 @@ export class FriendNetwork extends EventTarget {
       }
     }
     link.actions.hello.onMessage = async (hello, {peerId}) => {
-      const genuine = await verifySigned(hello, helloText(roomId, peerId, this.selfId))      if (!genuine || this.links.get(roomId) !== link || link.peers.has(peerId)) return
+      const genuine = await verifySigned(hello, helloText(roomId, peerId, this.selfId))
+      if (!genuine || this.links.get(roomId) !== link || link.peers.has(peerId)) return
       link.peers.set(peerId, hello.username)
       this.verified(link, peerId, hello.username)
       for (const replay of link.early.get(peerId) || []) replay()
