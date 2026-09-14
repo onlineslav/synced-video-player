@@ -9,6 +9,7 @@ import {
   preferHighStartBitrate,
   preferStereoOpus,
 } from './lib.mjs'
+import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 
 const APP_ID = 'synced-video-player-7c1e4b'
@@ -16,6 +17,8 @@ const STATE_INTERVAL_MS = 1000
 const VIDEO_MAX_BITRATE = 10_000_000
 const AUDIO_MAX_BITRATE = 256_000
 const MAX_STREAM_WIDTH = 1920
+// Latency doesn't matter when both people watch the same stream, so trade a little for smoothness.
+const VIEWER_BUFFER_MS = 250
 const SUBTITLE_FILE = /\.(srt|ass|ssa|vtt)$/i
 const LOAD_SUBTITLE = '__load__'
 
@@ -26,6 +29,28 @@ RTCPeerConnection.prototype.setRemoteDescription = function (description, ...res
     description = {type: description.type, sdp: preferHighStartBitrate(preferStereoOpus(description.sdp))}
   }
   return setRemoteDescription.call(this, description, ...rest)
+}
+
+// VP8, WebRTC's default, is encoded in software; H.264 gets hardware encode/decode on both
+// Mac and Windows, leaving the host's CPU for playback and conversion.
+function preferH264(pc) {
+  const codecs = RTCRtpReceiver.getCapabilities?.('video')?.codecs
+  if (!codecs) return
+  const isH264 = (c) => c.mimeType.toLowerCase() === 'video/h264'
+  const ordered = [...codecs.filter(isH264), ...codecs.filter((c) => !isH264(c))]
+  for (const transceiver of pc.getTransceivers()) {
+    if (transceiver.receiver.track?.kind !== 'video') continue
+    try {
+      transceiver.setCodecPreferences(ordered)
+    } catch {}
+  }
+}
+for (const method of ['createOffer', 'createAnswer', 'setLocalDescription']) {
+  const original = RTCPeerConnection.prototype[method]
+  RTCPeerConnection.prototype[method] = function (...args) {
+    preferH264(this)
+    return original.apply(this, args)
+  }
 }
 
 const $ = (id) => document.getElementById(id)
@@ -71,7 +96,8 @@ const blankSession = () => ({
   hostId: null,
   claimedAt: 0,
   remote: null, // latest host state, for viewers
-  stream: null, // captured stream, for the host
+  stream: null, // outgoing stream, for the host
+  captured: null, // video.captureStream() backing it
   seeking: false,
 })
 let session = blankSession()
@@ -108,6 +134,9 @@ async function enterRoom(code) {
 
   room.onPeerStream = (stream, peerId) => {
     session.peerStreams.set(peerId, stream)
+    for (const receiver of room.getPeers()[peerId]?.getReceivers() || []) {
+      if ('jitterBufferTarget' in receiver) receiver.jitterBufferTarget = VIEWER_BUFFER_MS
+    }
     attachRemoteStream()
   }
 
@@ -165,12 +194,27 @@ function stopHosting() {
   setRole('idle')
 }
 
+// Video comes from captureVideoFrames (true source frame rate); captureStream supplies audio,
+// and video too if the frame APIs are unavailable.
 function publishStream() {
   unpublishStream()
-  const stream = ui.localVideo.captureStream()
+  const video = ui.localVideo
+  const captured = video.captureStream()
+  const frames = captureVideoFrames(video)
+  const usable = (track) => !(frames && track.kind === 'video')
+  for (const track of captured.getTracks()) if (!usable(track)) track.stop()
+
+  const stream = new MediaStream([...(frames ? [frames] : []), ...captured.getTracks().filter(usable)])
+  // Films should drop resolution before frame rate when the connection or CPU struggles.
+  stream.getVideoTracks().forEach((track) => (track.contentHint = 'motion'))
   session.stream = stream
-  stream.addEventListener('addtrack', ({track}) => {
-    if (session.stream === stream) Promise.all(session.room.addTrack(track, stream)).then(tuneSenders, () => {})
+  session.captured = captured
+
+  captured.addEventListener('addtrack', ({track}) => {
+    if (session.stream !== stream || !usable(track)) return track.stop()
+    if (track.kind === 'video') track.contentHint = 'motion'
+    stream.addTrack(track)
+    Promise.all(session.room.addTrack(track, stream)).then(tuneSenders, () => {})
   })
   if (session.peers.size) Promise.all(session.room.addStream(stream)).then(tuneSenders, () => {})
 }
@@ -183,6 +227,8 @@ function unpublishStream() {
     session.room?.removeStream(stream)
   } catch {}
   stream.getTracks().forEach((track) => track.stop())
+  session.captured?.getTracks().forEach((track) => track.stop())
+  session.captured = null
 }
 
 // Raise WebRTC's conservative defaults so a movie looks and sounds like a movie.
