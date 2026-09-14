@@ -633,10 +633,23 @@ function publishStream() {
   session.stream = stream
   session.captured = captured
 
+  // Capture can end/replace tracks without changing the MediaSource. Retaining an
+  // old audio sender leaves a silent track alongside its replacement on viewers.
+  const removeTrack = (track) => {
+    if (session.stream !== stream || !stream.getTracks().includes(track)) return
+    session.room.removeTrack(track)
+    stream.removeTrack(track)
+  }
+  const watchTrack = (track) => track.addEventListener('ended', () => removeTrack(track), {once: true})
+  captured.getTracks().filter(usable).forEach(watchTrack)
+  captured.addEventListener('removetrack', ({track}) => removeTrack(track))
   captured.addEventListener('addtrack', ({track}) => {
     if (session.stream !== stream || !usable(track)) return track.stop()
+    if (track.readyState === 'ended') return
     if (track.kind === 'video') track.contentHint = 'motion'
+    for (const old of stream.getTracks()) if (old.readyState === 'ended') removeTrack(old)
     stream.addTrack(track)
+    watchTrack(track)
     Promise.all(session.room.addTrack(track, stream, {metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
   })
   if (session.peers.size) Promise.all(session.room.addStream(stream, {metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
@@ -882,6 +895,7 @@ function attachRemoteStream() {
   const entry = session.peerStreams.get(session.hostId)
   const stream = entry?.claimedAt === session.remote?.claimedAt ? entry.stream : null
   if (stream && ui.remoteVideo.srcObject !== stream) {
+    detachRemoteStream()
     ui.remoteVideo.srcObject = stream
     session.lastFrameAt = performance.now()
     const current = session
@@ -895,16 +909,28 @@ function attachRemoteStream() {
       ui.remoteVideo.requestVideoFrameCallback?.(onFrame)
     }
     ui.remoteVideo.requestVideoFrameCallback?.(onFrame)
-    routeRemoteAudio(stream)
-    stream.onaddtrack = () => {
+    remoteAudioLifetime = new AbortController()
+    const options = {signal: remoteAudioLifetime.signal}
+    const refreshAudio = () => {
       if (ui.remoteVideo.srcObject === stream) routeRemoteAudio(stream)
     }
+    const watched = new WeakSet()
+    const watchTrack = (track) => {
+      if (track.kind !== 'audio' || watched.has(track)) return
+      watched.add(track)
+      for (const event of ['ended', 'mute', 'unmute']) track.addEventListener(event, refreshAudio, options)
+    }
+    stream.getTracks().forEach(watchTrack)
+    stream.addEventListener('addtrack', ({track}) => { watchTrack(track); refreshAudio() }, options)
+    stream.addEventListener('removetrack', refreshAudio, options)
+    refreshAudio()
     ui.remoteVideo.play().catch(() => {})
   }
 }
 
 function detachRemoteStream() {
-  if (ui.remoteVideo.srcObject) ui.remoteVideo.srcObject.onaddtrack = null
+  remoteAudioLifetime?.abort()
+  remoteAudioLifetime = null
   ui.remoteVideo.srcObject = null
   remoteAudio?.disconnect()
   remoteAudio = null
@@ -2301,6 +2327,7 @@ let unmutedVolume = 1
 // Audio only while the stream is also attached to an element, which remoteVideo is).
 let output = null
 let remoteAudio = null
+let remoteAudioLifetime = null
 
 function audioOutput() {
   if (!output) {
@@ -2316,11 +2343,16 @@ function audioOutput() {
 }
 
 function routeRemoteAudio(stream) {
+  const tracks = stream.getAudioTracks().filter((track) => track.readyState === 'live')
+  const track = tracks.find((track) => !track.muted) || tracks[0]
+  const out = track ? audioOutput() : null
+  if (track && remoteAudio?.mediaStream.getAudioTracks()[0] === track) return
   remoteAudio?.disconnect()
   remoteAudio = null
-  if (!stream.getAudioTracks().length) return
-  const out = audioOutput()
-  remoteAudio = audio.createMediaStreamSource(stream)
+  if (!track) return
+  // A source node keeps its originally selected track, even after that track is
+  // removed. Give it exactly the live track we want instead of relying on ID order.
+  remoteAudio = audio.createMediaStreamSource(new MediaStream([track]))
   remoteAudio.connect(out)
 }
 

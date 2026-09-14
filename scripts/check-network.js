@@ -61,6 +61,29 @@ async function fixtures() {
       get session() { return session }, get identity() { return identity },
       friendNetwork, enterRoom, leaveRoom, hostFile, control, receiveImage, shownImage, selectSubtitle,
       audioState: () => ({running: audio?.state === 'running', connected: Boolean(remoteAudio)}),
+      audioLevel: () => {
+        if (!output || !audio) return 0;
+        if (!__test.analyser) {
+          __test.analyser = audio.createAnalyser();
+          output.connect(__test.analyser);
+        }
+        const samples = new Float32Array(__test.analyser.fftSize);
+        __test.analyser.getFloatTimeDomainData(samples);
+        return Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+      },
+      replaceCapturedAudio: (event) => {
+        const captured = session.captured;
+        const old = captured.getAudioTracks()[0];
+        const replacement = old.clone();
+        // Model capture replacing its track during a media pipeline reset. Scripted
+        // mutations need explicit events; browser-driven changes fire these themselves.
+        old.stop();
+        captured.removeTrack(old);
+        if (event === 'ended') old.dispatchEvent(new Event('ended'));
+        else captured.dispatchEvent(new MediaStreamTrackEvent('removetrack', {track: old}));
+        captured.addTrack(replacement);
+        captured.dispatchEvent(new MediaStreamTrackEvent('addtrack', {track: replacement}));
+      },
       getState: hostState, selfId, errors: [],
     };
     window.addEventListener('error', (e) => __test.errors.push(e.message));
@@ -87,7 +110,7 @@ async function fixtures() {
     .replace('href="styles.css"', `href="${pathToFileURL(path.join(root, 'renderer/styles.css'))}"`)
   fs.writeFileSync(path.join(temporary, 'index.html'), html)
   const video = path.join(temporary, 'sample.mp4')
-  execFileSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', video], {windowsHide: true, timeout: 15000})
+  execFileSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440', '-f', 'lavfi', '-i', 'sine=frequency=880', '-map', '0:v', '-map', '1:a', '-map', '2:a', '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=jpn', '-t', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', video], {windowsHide: true, timeout: 15000})
   fs.writeFileSync(path.join(temporary, 'sample.srt'), '1\n00:00:00,000 --> 00:00:20,000\nShared test caption\n')
   const sound = path.join(temporary, 'sound.m4a')
   execFileSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '30', '-c:a', 'aac', sound], {windowsHide: true, timeout: 15000})
@@ -149,6 +172,7 @@ app.whenReady().then(async () => {
     await Promise.all([b, c].map((win) => until(win, '__test.session.role === "viewer" && document.getElementById("remote-video").getVideoPlaybackQuality().totalVideoFrames > 12')))
     await until(b, '__test.session.clock !== null')
     await Promise.all([b, c].map((win) => until(win, '__test.audioState().running && __test.audioState().connected')))
+    await Promise.all([b, c].map((win) => until(win, '__test.audioLevel() > 0.01')))
     console.log('PASS: Both viewers receive moving video and clock synchronization')
     await until(b, '__test.session.remote.subtitles.length === 1')
     assert.equal(await run(b, 'JSON.stringify(__test.session.remote.subtitles).includes("external:")'), false)
@@ -163,6 +187,26 @@ app.whenReady().then(async () => {
     await run(b, '__test.control("play")')
     await until(a, '!document.getElementById("local-video").paused')
     console.log('PASS: Viewer pause, seek and resume reach the host and other viewer')
+    for (const track of [1, 0, 1, 0]) {
+      await run(b, '__test.control("pause")')
+      await until(a, 'document.getElementById("local-video").paused')
+      await Promise.all([b, c].map((win) => until(win, '__test.audioLevel() < 0.001')))
+      await run(b, `__test.control('audio', __test.session.remote.audio[${track}].value)`)
+      await until(a, `__test.getState().audioSelected === __test.getState().audio[${track}].value && document.getElementById('local-video').readyState >= 3`)
+      await run(b, '__test.control("play")')
+      await Promise.all([b, c].map((win) => until(win, '__test.audioLevel() > 0.01')))
+    }
+    console.log('PASS: Both viewers receive audible samples after repeated paused English/Japanese switches')
+    for (const event of ['removetrack', 'ended']) {
+      await run(b, '__test.control("pause")')
+      await until(a, 'document.getElementById("local-video").paused')
+      await Promise.all([b, c].map((win) => until(win, '__test.audioLevel() < 0.001')))
+      await run(a, `__test.replaceCapturedAudio(${JSON.stringify(event)})`)
+      assert.equal(await run(a, '__test.session.stream.getAudioTracks().length'), 1)
+      await run(b, '__test.control("play")')
+      await Promise.all([b, c].map((win) => until(win, '__test.audioLevel() > 0.01 && document.getElementById("remote-video").srcObject.getAudioTracks().length === 1')))
+    }
+    console.log('PASS: Replaced capture audio removes the old sender and remains audible for both viewers')
     await run(c, `__test.hostFile(${JSON.stringify(video)})`)
     await until(a, '__test.session.role === "viewer" && document.getElementById("remote-video").readyState >= 2')
     await until(b, '__test.session.peerStreams.get(__test.session.hostId)?.claimedAt === __test.session.remote.claimedAt')
