@@ -11,6 +11,7 @@
   </head>
   <body>
     <main id="home" class="home">
+      <div class="home-layout">
       <div class="home-card">
         <section class="profile-card">
           <span id="profile-avatar" class="avatar big-avatar">?</span>
@@ -31,6 +32,19 @@
           <input id="join-code" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false" aria-label="Room code" />
           <button type="submit">Join</button>
         </form>
+      </div>
+
+      <section class="friends-panel">
+        <h2>Friends</h2>
+        <form id="add-friend" class="add-friend">
+          <input id="friend-username" placeholder="Friend's username" autocomplete="off" spellcheck="false" aria-label="Friend's username" />
+          <button type="submit">Add</button>
+        </form>
+        <p id="friend-error" class="friend-error" hidden></p>
+        <ul id="friend-requests" class="friend-list"></ul>
+        <ul id="friend-list" class="friend-list"></ul>
+        <p id="friends-empty" class="friends-empty">Send your username to a friend and add theirs.</p>
+      </section>
       </div>
     </main>
 

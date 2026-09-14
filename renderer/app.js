@@ -11,6 +11,7 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {FriendNetwork} from './friends.mjs'
 import {createIdentity, isValidIdentity, normalizeUsername} from './identity.mjs'
 import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -88,6 +89,12 @@ const ui = {
   profileName: $('profile-name'),
   username: $('username'),
   newUsername: $('new-username'),
+  addFriend: $('add-friend'),
+  friendUsername: $('friend-username'),
+  friendError: $('friend-error'),
+  friendRequests: $('friend-requests'),
+  friendList: $('friend-list'),
+  friendsEmpty: $('friends-empty'),
   create: $('create'),
   joinForm: $('join-form'),
   joinCode: $('join-code'),
@@ -529,6 +536,73 @@ function bindNameInput(input) {
 function shareProfile() {
   renderProfile()
   session.profileAction?.send(myProfile()).catch(() => {})
+  if (friendNetwork.identity) friendNetwork.updateProfile(myProfile())
+}
+
+// ---------- Friends ----------
+
+const localStore = {
+  load(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key))
+    } catch {
+      return null
+    }
+  },
+  save(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value))
+    } catch {}
+  },
+}
+
+const friendNetwork = new FriendNetwork({joinRoom, selfId, appId: APP_ID, storage: localStore})
+
+function friendStatus({confirmed, requested}) {
+  if (confirmed) return 'Friends'
+  if (requested) return 'Waiting for them to add you back'
+  return 'Request sends when they next open the app'
+}
+
+function renderFriends() {
+  const requests = friendNetwork.requestList()
+  const friends = friendNetwork.list().sort((a, b) => b.confirmed - a.confirmed || (a.name || a.username).localeCompare(b.name || b.username))
+
+  ui.friendRequests.replaceChildren(
+    ...requests.map(({username, name}) => {
+      const row = element('li', 'friend friend-request')
+      const main = element('div', 'person-main')
+      main.append(element('div', 'person-name', name || username), element('div', 'person-stats', 'Wants to be friends'))
+      main.lastChild.title = `Username: ${username}`
+      const accept = element('button', 'primary small', 'Add back')
+      accept.addEventListener('click', () => friendNetwork.add(username))
+      const ignore = element('button', 'ghost small', 'Ignore')
+      ignore.addEventListener('click', () => friendNetwork.ignoreRequest(username))
+      const actions = element('div', 'friend-actions')
+      actions.append(accept, ignore)
+      row.append(element('span', 'avatar', (name || username)[0].toUpperCase()), main, actions)
+      return row
+    }),
+  )
+
+  ui.friendList.replaceChildren(
+    ...friends.map((friend) => {
+      const label = friend.name || friend.username
+      const row = element('li', 'friend')
+      const main = element('div', 'person-main')
+      main.append(element('div', 'person-name', label), element('div', 'person-stats', friendStatus(friend)))
+      main.firstChild.title = `Username: ${friend.username}`
+      const remove = element('button', 'friend-remove', '×')
+      remove.title = 'Remove friend'
+      remove.setAttribute('aria-label', `Remove ${label}`)
+      remove.addEventListener('click', () => {
+        if (confirm(`Remove ${label} from your friends?`)) friendNetwork.remove(friend.username)
+      })
+      row.append(element('span', 'avatar', label[0].toUpperCase()), main, remove)
+      return row
+    }),
+  )
+  ui.friendsEmpty.hidden = friends.length + requests.length > 0
 }
 
 // ---------- People ----------
@@ -947,9 +1021,22 @@ window.api.userName().then((name) => {
   shareProfile()
 })
 bindNameInput(ui.profileName)
-loadIdentity().then((loaded) => {
+Promise.all([loadIdentity(), window.api.iceServers().catch(() => [])]).then(([loaded, turnConfig]) => {
   identity = loaded
+  friendNetwork.turnConfig = turnConfig
+  friendNetwork.start(identity, myProfile())
   shareProfile()
+})
+
+friendNetwork.addEventListener('change', renderFriends)
+renderFriends()
+
+ui.addFriend.addEventListener('submit', (event) => {
+  event.preventDefault()
+  const error = identity ? friendNetwork.add(ui.friendUsername.value) : 'Still starting up, try again in a moment.'
+  ui.friendError.textContent = error || ''
+  ui.friendError.hidden = !error
+  if (!error) ui.friendUsername.value = ''
 })
 
 // Home has no toast, so buttons confirm by briefly changing their own text.
@@ -971,6 +1058,7 @@ ui.newUsername.addEventListener('click', async () => {
   if (!confirm('Make a new username? Friends who added you will have to add you again.')) return
   identity = saveIdentity(await createIdentity())
   delete ui.username.dataset.original
+  friendNetwork.restart(identity)
   shareProfile()
 })
 
@@ -1095,7 +1183,10 @@ ui.stage.addEventListener('drop', (event) => {
   addSubtitleFile(filePath)
 })
 
-window.addEventListener('beforeunload', () => session.room?.leave())
+window.addEventListener('beforeunload', () => {
+  session.room?.leave()
+  friendNetwork.stop()
+})
 
 setInterval(render, 250)
 requestAnimationFrame(drawCaptions)

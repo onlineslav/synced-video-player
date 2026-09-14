@@ -14,6 +14,10 @@ Watch a video file together from two computers (Windows or Mac, in any combinati
 
 Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute.
 
+### Friends
+
+Your username (e.g. `k7qm-x3pa-trb2`) is on the home screen. Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. Your display name is separate and can be changed any time. Making a new username means friends have to add you again.
+
 ## Installing
 
 **[Download the latest release](https://github.com/onlineslav/synced-video-player/releases/latest)**

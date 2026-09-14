@@ -65,6 +65,126 @@ button.ghost {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow: auto;
+}
+
+.home-layout {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.friends-panel {
+  width: 300px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.friends-panel h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.add-friend {
+  display: flex;
+  gap: 6px;
+}
+
+.add-friend input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  font-size: 13px;
+}
+
+.friend-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.friend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.friend-list:empty {
+  display: none;
+}
+
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.friend .person-main {
+  flex: 1;
+}
+
+.friend-request {
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.friend-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Buttons get their own line so the name and message aren't cut short. */
+.friend-request .friend-actions {
+  width: 100%;
+  padding-left: 44px;
+}
+
+button.small {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.friend-remove {
+  padding: 2px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+}
+
+.friend:hover .friend-remove,
+.friend-remove:focus {
+  opacity: 1;
+}
+
+.friends-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .home-card {

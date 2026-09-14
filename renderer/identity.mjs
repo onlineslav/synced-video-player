@@ -47,6 +47,28 @@ export async function createIdentity() {
   return {username: await usernameFor(publicKey), publicKey, privateKey}
 }
 
+const SIGNATURE = {name: 'ECDSA', hash: 'SHA-256'}
+const encode = (text) => new TextEncoder().encode(text)
+
+export async function sign(identity, text) {
+  const key = await crypto.subtle.importKey('jwk', identity.privateKey, KEY_ALGORITHM, false, ['sign'])
+  const signature = new Uint8Array(await crypto.subtle.sign(SIGNATURE, key, encode(text)))
+  return btoa(String.fromCharCode(...signature))
+}
+
+// True only when `publicKey` hashes to `username` and its private key signed `text`.
+export async function verifySigned({username, publicKey, signature} = {}, text) {
+  try {
+    if ((await usernameFor(publicKey)) !== username) return false
+    const jwk = {kty: 'EC', crv: publicKey.crv, x: publicKey.x, y: publicKey.y}
+    const key = await crypto.subtle.importKey('jwk', jwk, KEY_ALGORITHM, false, ['verify'])
+    const bytes = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0))
+    return await crypto.subtle.verify(SIGNATURE, key, bytes, encode(text))
+  } catch {
+    return false
+  }
+}
+
 // A stored identity is only used if its username still matches its key.
 export async function isValidIdentity(identity) {
   try {
