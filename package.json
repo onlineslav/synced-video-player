@@ -3,7 +3,7 @@
   "productName": "Synced Video Player",
   "version": "0.1.3",
   "description": "Watch local video files together. One host streams, everyone stays in sync.",
-  "main": "main/main.js",
+  "main": "main/index.js",
   "private": true,
   "scripts": {
     "bundle": "esbuild renderer/app.js --bundle --format=iife --target=chrome130 --outfile=renderer/bundle.js",

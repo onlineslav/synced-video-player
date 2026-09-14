@@ -32,6 +32,8 @@ A two-person watch-together app. There is no server: peers find each other throu
 
 ## Verified constraints (don't regress these)
 
+- **Entry point is `main/index.js`,** which calls `start()` from `main/main.js`. Electron 44 doesn't set `require.main` to the entry file, so a `require.main === module` check never runs and the app idles with no window.
+
 - **Only 8-bit video may pass through.** 10-bit HEVC/AV1/VP9 plays locally, but `captureStream` sends WebRTC solid black frames. `copyCodecString` forces a transcode.
 - **Stream-copy seeks:** ffmpeg backs input seeks off by ~0.13s for B-frame video and lands on the previous keyframe. `media.js` looks up the keyframe with `ffprobe -read_intervals`, and `plan.js` seeks to keyframe + 0.2s. The MP4 muxer normalizes output timestamps to 0 even with `-copyts`, so the renderer sets `sourceBuffer.timestampOffset = offset`.
 - **Burned-in subtitles** need `-copyts` for correct timing. The `subtitles` filter gets a relative filename with the process `cwd` set to the file's folder, which avoids Windows drive-letter colons in the filter graph. The filename is escaped twice (`escapeFilterValue`). Image subtitles (PGS/VobSub) use `overlay` in `-filter_complex`.
