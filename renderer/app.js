@@ -11,14 +11,24 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {
+  MIN_BUFFER_MS,
+  adaptBuffer,
+  describeLink,
+  inboundDelta,
+  isSteady,
+  isTroubled,
+  nextSteady,
+  readStats,
+} from './telemetry.mjs'
 
 const APP_ID = 'synced-video-player-7c1e4b'
 const STATE_INTERVAL_MS = 1000
 const VIDEO_MAX_BITRATE = 10_000_000
 const AUDIO_MAX_BITRATE = 256_000
 const MAX_STREAM_WIDTH = 1920
-// Latency doesn't matter when both people watch the same stream, so trade a little for smoothness.
-const VIEWER_BUFFER_MS = 250
+const TELEMETRY_INTERVAL_MS = 2000
+const POOR_LINK_TOAST_EVERY_MS = 60_000
 const SUBTITLE_FILE = /\.(srt|ass|ssa|vtt)$/i
 const LOAD_SUBTITLE = '__load__'
 
@@ -62,6 +72,7 @@ const ui = {
   room: $('room'),
   code: $('code'),
   peerStatus: $('peer-status'),
+  link: $('link'),
   title: $('title'),
   role: $('role'),
   openButtons: document.querySelectorAll('[data-open-video]'),
@@ -99,6 +110,13 @@ const blankSession = () => ({
   stream: null, // outgoing stream, for the host
   captured: null, // video.captureStream() backing it
   seeking: false,
+  telemetryAction: null,
+  link: null, // {rttMs, relayed, sender, receiver} for the connection badge
+  lastInbound: null,
+  buffer: {bufferMs: MIN_BUFFER_MS, calmMs: 0},
+  lastPoorToast: 0,
+  epoch: 0, // host: bumps whenever ffmpeg restarts, so viewers can tell a restart from a freeze
+  steady: {since: null, epoch: 0}, // viewer: when the host's playback last became uninterrupted
 })
 let session = blankSession()
 
@@ -107,7 +125,14 @@ let session = blankSession()
 async function enterRoom(code) {
   const turnConfig = await window.api.iceServers().catch(() => [])
   const room = joinRoom({appId: APP_ID, password: code, ...(turnConfig.length && {turnConfig})}, code)
-  session = {...blankSession(), code, room, stateAction: room.makeAction('state'), commandAction: room.makeAction('command')}
+  session = {
+    ...blankSession(),
+    code,
+    room,
+    stateAction: room.makeAction('state'),
+    commandAction: room.makeAction('command'),
+    telemetryAction: room.makeAction('telemetry'),
+  }
 
   room.onPeerJoin = (peerId) => {
     session.peers.add(peerId)
@@ -134,15 +159,18 @@ async function enterRoom(code) {
 
   room.onPeerStream = (stream, peerId) => {
     session.peerStreams.set(peerId, stream)
-    for (const receiver of room.getPeers()[peerId]?.getReceivers() || []) {
-      if ('jitterBufferTarget' in receiver) receiver.jitterBufferTarget = VIEWER_BUFFER_MS
-    }
+    applyViewerBuffer(room.getPeers()[peerId])
     attachRemoteStream()
   }
 
   session.stateAction.onMessage = (state, {peerId}) => receiveState(state, peerId)
   session.commandAction.onMessage = ({cmd, value}) => {
     if (session.role === 'host') applyCommand(cmd, value)
+  }
+  session.telemetryAction.onMessage = (receiver) => {
+    if (session.role !== 'host') return
+    session.link = {...session.link, receiver}
+    noteLinkHealth()
   }
 
   ui.code.textContent = formatRoomCode(code)
@@ -267,7 +295,70 @@ function hostState() {
     audioSelected: player.audioIndex == null ? '' : String(player.audioIndex),
     subtitles: (media?.subtitles || []).map((s) => ({value: s.id, label: s.label})),
     subtitleSelected: player.subtitleId || '',
+    sender: session.link?.sender || null,
+    epoch: session.epoch,
   }
+}
+
+// ---------- Connection health ----------
+
+function applyViewerBuffer(pc) {
+  for (const receiver of pc?.getReceivers() || []) {
+    if ('jitterBufferTarget' in receiver && receiver.jitterBufferTarget !== session.buffer.bufferMs) {
+      receiver.jitterBufferTarget = session.buffer.bufferMs
+    }
+  }
+}
+
+// Every couple of seconds: measure the connection to the other person. Viewers also adapt
+// their buffer and report what they're receiving so the host can see it.
+async function sampleConnection() {
+  const peerId = session.role === 'viewer' ? session.hostId : [...session.peers][0]
+  const pc = peerId && session.room?.getPeers()[peerId]
+  if (!pc) {
+    session.link = null
+    return
+  }
+  const room = session.room
+  const stats = readStats(await pc.getStats())
+  if (session.room !== room) return
+  const base = {rttMs: stats.rttMs, relayed: stats.relayed}
+
+  if (isHost()) {
+    session.link = {...session.link, ...base, sender: stats.outbound}
+  } else if (session.role === 'viewer' && stats.inbound) {
+    // Packet loss is always the network; freezes and jitter only count during steady playback.
+    const steady = isSteady(session.steady, performance.now())
+    const measured = inboundDelta(session.lastInbound, stats.inbound)
+    const delta = measured && !steady ? {...measured, freezes: 0, droppedFrames: 0} : measured
+    session.lastInbound = stats.inbound
+    session.buffer = adaptBuffer(session.buffer, isTroubled(delta, steady ? stats.inbound.jitterMs : 0), TELEMETRY_INTERVAL_MS)
+    applyViewerBuffer(pc)
+    const receiver = {
+      lossPct: delta?.lossPct ?? 0,
+      freezes: delta?.freezes ?? 0,
+      droppedFrames: delta?.droppedFrames ?? 0,
+      fps: stats.inbound.fps,
+      height: stats.inbound.height,
+      bufferMs: session.buffer.bufferMs,
+    }
+    session.link = {...base, receiver, sender: session.remote?.sender || null}
+    session.telemetryAction.send(receiver, {target: session.hostId}).catch(() => {})
+  } else {
+    session.link = base
+  }
+  noteLinkHealth()
+}
+
+function noteLinkHealth() {
+  if (!session.link) return
+  const health = describeLink({selfRole: session.role, ...session.link})
+  const now = Date.now()
+  if (health.level === 'poor' && now - session.lastPoorToast > POOR_LINK_TOAST_EVERY_MS) {
+    session.lastPoorToast = now
+    toast(health.detail.split('\n')[0], true)
+  }
+  render()
 }
 
 function broadcastState(target) {
@@ -298,8 +389,10 @@ function receiveState(state, peerId) {
     stopHosting()
     toast('Your friend is hosting now')
   }
+  const now = performance.now()
+  session.steady = nextSteady(session.steady, state, session.remote ? viewerTime() : state.time, now)
   session.hostId = state.hostId
-  session.remote = {...state, receivedAt: performance.now()}
+  session.remote = {...state, receivedAt: now}
   if (session.role !== 'viewer') setRole('viewer')
   attachRemoteStream()
   render()
@@ -333,6 +426,7 @@ function control(cmd, value) {
   const r = session.remote
   if (session.role !== 'viewer' || !r) return
   session.commandAction.send({cmd, value}, {target: session.hostId}).catch(() => {})
+  session.steady = {...session.steady, since: null}
   // Reflect the change immediately; the host's next state message confirms it.
   const now = performance.now()
   if (cmd === 'play' || cmd === 'pause') Object.assign(r, {time: viewerTime(), playing: cmd === 'play', receivedAt: now})
@@ -369,6 +463,13 @@ function render() {
   const peerCount = session.peers.size
   ui.peerStatus.textContent = peerCount ? 'Friend connected' : 'Waiting for your friend to join…'
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
+  const health = peerCount && session.link ? describeLink({selfRole: role, ...session.link}) : null
+  ui.link.hidden = !health
+  if (health) {
+    ui.link.textContent = health.text
+    ui.link.title = health.detail
+    ui.link.dataset.level = health.level
+  }
   ui.title.textContent = host ? player.media?.title || player.media?.name || '' : r?.title || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
   ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: ''}[role]
@@ -480,7 +581,10 @@ ui.localVideo.addEventListener('loadedmetadata', () => {
 })
 
 player.addEventListener('media', () => broadcastState())
-player.addEventListener('session', () => broadcastState())
+player.addEventListener('session', () => {
+  session.epoch++
+  broadcastState()
+})
 player.addEventListener('loading', () => render())
 player.addEventListener('error', ({detail}) => toast(detail, true))
 
@@ -529,6 +633,7 @@ ui.stage.addEventListener('drop', (event) => {
 window.addEventListener('beforeunload', () => session.room?.leave())
 
 setInterval(render, 250)
+setInterval(() => sampleConnection().catch(() => {}), TELEMETRY_INTERVAL_MS)
 setInterval(() => {
   if (!isHost()) return
   broadcastState()

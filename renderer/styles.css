@@ -162,6 +162,35 @@ button.ghost {
   color: var(--ok);
 }
 
+.link {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: help;
+}
+
+.link::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  vertical-align: 1px;
+}
+
+.link[data-level='fair']::before {
+  background: #f5c451;
+}
+
+.link[data-level='poor']::before {
+  background: var(--danger);
+}
+
 .title {
   flex: 1;
   min-width: 0;
