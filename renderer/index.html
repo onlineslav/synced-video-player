@@ -33,21 +33,38 @@
     </main>
 
     <main id="home" class="home" hidden>
-      <div class="home-layout">
+      <div class="corner">
+        <button id="open-settings" class="ghost icon-button" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" /></svg>
+        </button>
+        <button id="friends-toggle" class="ghost icon-button friends-toggle" title="Friends" aria-label="Friends" aria-expanded="false" aria-controls="friends">
+          <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 13c-3.3 0-7 1.6-7 4v3h14v-3c0-2.4-3.7-4-7-4zm7 0c-.4 0-.8 0-1.2.1 1.3.9 2.2 2.2 2.2 3.9v3h5v-3c0-2.2-3.2-4-6-4z" /></svg>
+        </button>
+      </div>
+
+      <button data-pin class="ghost icon-button pin-toggle home-pin" title="Pin: stay on top of other windows" aria-label="Stay on top" aria-pressed="false">
+        <svg viewBox="0 0 24 24"><path d="M16 9V4h1a1 1 0 0 0 0-2H7a1 1 0 0 0 0 2h1v5a3 3 0 0 1-3 3v2h5.97v7l1 1 1-1v-7H19v-2a3 3 0 0 1-3-3z" /></svg>
+      </button>
+
+      <div id="home-invites" class="home-invites"></div>
+
+      <aside id="friends" class="friends-drawer" aria-label="Friends">
+        <h2>Friends</h2>
+        <div class="my-username">
+          <button id="username" class="username" title="Copy your username">…</button>
+          <p class="hint">Your username. Send it to a friend so they can add you.</p>
+        </div>
+        <form id="add-friend" class="add-friend">
+          <input id="friend-username" placeholder="Friend's username" autocomplete="off" spellcheck="false" aria-label="Friend's username" />
+          <button type="submit">Add</button>
+        </form>
+        <p id="friend-error" class="friend-error" hidden></p>
+        <ul id="friend-requests" class="friend-list"></ul>
+        <ul id="friend-list" class="friend-list"></ul>
+        <p id="friends-empty" class="friends-empty">No friends yet. Add someone by their username.</p>
+      </aside>
+
       <div class="home-card">
-        <section class="profile-card">
-          <span id="profile-avatar" class="avatar big-avatar">?</span>
-          <div class="profile-main">
-            <input id="profile-name" class="profile-name name-input" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Your display name" title="Change your display name" />
-            <div class="profile-username">
-              <span>Username</span>
-              <button id="username" class="username" title="Copy your username to send to a friend">…</button>
-            </div>
-          </div>
-          <button id="open-settings" class="ghost icon-button settings-button" title="Settings">
-            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" /></svg>
-          </button>
-        </section>
         <h1>Synced Video Player</h1>
         <p class="lede">Watch together. Whoever opens a video, song or picture hosts it, and both of you control playback.</p>
         <button id="create" class="primary big">Create a room</button>
@@ -57,24 +74,24 @@
           <button type="submit">Join</button>
         </form>
       </div>
-
-      <section class="friends-panel">
-        <h2>Friends</h2>
-        <form id="add-friend" class="add-friend">
-          <input id="friend-username" placeholder="Friend's username" autocomplete="off" spellcheck="false" aria-label="Friend's username" />
-          <button type="submit">Add</button>
-        </form>
-        <p id="friend-error" class="friend-error" hidden></p>
-        <ul id="friend-requests" class="friend-list"></ul>
-        <ul id="friend-list" class="friend-list"></ul>
-        <p id="friends-empty" class="friends-empty">Send your username to a friend and add theirs.</p>
-      </section>
-      </div>
     </main>
 
-    <main id="settings" class="home" hidden>
-      <div class="home-card settings-card">
-        <h1>Settings</h1>
+    <div id="settings" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <header class="modal-header">
+          <h1 id="settings-title">Settings</h1>
+          <button id="settings-back" class="ghost icon-button" title="Close (Esc)" aria-label="Close settings">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <section class="settings-section">
+          <h2>Display name</h2>
+          <div class="settings-profile">
+            <span id="profile-avatar" class="avatar big-avatar">?</span>
+            <input id="profile-name" class="settings-name" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Your display name" />
+          </div>
+          <p class="hint">What people see. You can change it any time.</p>
+        </section>
         <section class="settings-section">
           <h2>Username</h2>
           <p class="hint">Friends add you by this. Changing it gives you a new one, and friends who added you will have to add you again.</p>
@@ -83,12 +100,17 @@
             <button id="new-username">Change username</button>
           </div>
         </section>
-        <button id="settings-back" class="ghost">Back</button>
       </div>
-    </main>
+    </div>
 
     <section id="room" class="room" hidden>
       <header class="topbar">
+        <button id="room-settings" class="ghost icon-button" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" /></svg>
+        </button>
+        <button class="ghost icon-button friends-toggle" title="Friends" aria-label="Friends" aria-expanded="false" aria-controls="friends">
+          <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 13c-3.3 0-7 1.6-7 4v3h14v-3c0-2.4-3.7-4-7-4zm7 0c-.4 0-.8 0-1.2.1 1.3.9 2.2 2.2 2.2 3.9v3h5v-3c0-2.2-3.2-4-6-4z" /></svg>
+        </button>
         <button id="code" class="code" title="Copy room code"></button>
         <span id="peer-status" class="peer-status"></span>
         <span id="link" class="link" data-level="good" hidden></span>
@@ -98,7 +120,7 @@
           <svg viewBox="0 0 24 24"><path d="M3.5 17.3V20.5h3.2l9.4-9.4-3.2-3.2zm15-8.8a.9.9 0 0 0 0-1.2l-2-2a.9.9 0 0 0-1.2 0L13.7 6.9l3.2 3.2z" /><path d="M2 22h20v-1H2z" /></svg>
         </button>
         <button id="people-toggle" class="ghost people-toggle" title="People in the room">
-          <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM9 13c-3.3 0-7 1.6-7 4v3h14v-3c0-2.4-3.7-4-7-4zm7 0c-.4 0-.8 0-1.2.1 1.3.9 2.2 2.2 2.2 3.9v3h5v-3c0-2.2-3.2-4-6-4z" /></svg>
+          <svg viewBox="0 0 24 24"><path d="M21 10c-1.1 0-2 .9-2 2v3H5v-3c0-1.1-.9-2-2-2s-2 .9-2 2v5c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2v-5c0-1.1-.9-2-2-2zm-3-5H6c-1.1 0-2 .9-2 2v2.15c1.16.41 2 1.51 2 2.82V14h12v-2.03c0-1.3.84-2.4 2-2.82V7c0-1.1-.9-2-2-2z" /></svg>
           <span id="people-count">1</span>
         </button>
         <button data-open-media>Open media</button>
@@ -128,9 +150,15 @@
         <div id="toast" class="toast" hidden></div>
 
         <div id="controls" class="controls">
+          <button data-skip="-10" class="icon" title="Back 10 seconds (Left arrow)" aria-label="Back 10 seconds">
+            <svg class="skip-icon" viewBox="0 0 24 24"><path class="skip-arc" d="M12 4a8 8 0 1 1-7.4 5" /><path d="M12 1v6L8 4z" /><text x="12" y="15">10</text></svg>
+          </button>
           <button id="play" class="icon" data-state="paused" title="Play / pause (Space)">
             <svg class="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
             <svg class="icon-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z" /></svg>
+          </button>
+          <button data-skip="30" class="icon" title="Forward 30 seconds (Right arrow)" aria-label="Forward 30 seconds">
+            <svg class="skip-icon" viewBox="0 0 24 24"><path class="skip-arc" d="M12 4a8 8 0 1 0 7.4 5" /><path d="M12 1v6l4-3z" /><text x="12" y="15">30</text></svg>
           </button>
           <span id="time" class="time">0:00</span>
           <input id="seek" class="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek" />
@@ -154,6 +182,9 @@
             <input id="volume" class="volume-slider" type="range" min="0" max="2" step="0.01" value="1" aria-label="Volume" />
             <output id="volume-readout" class="volume-readout" for="volume">100%</output>
           </div>
+          <button data-pin class="icon pin-toggle" title="Pin: stay on top of other windows" aria-label="Stay on top" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><path d="M16 9V4h1a1 1 0 0 0 0-2H7a1 1 0 0 0 0 2h1v5a3 3 0 0 1-3 3v2h5.97v7l1 1 1-1v-7H19v-2a3 3 0 0 1-3-3z" /></svg>
+          </button>
           <button id="fullscreen" class="icon" title="Fullscreen (F)">
             <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 4v-4h2v6h-6v-2z" /></svg>
           </button>
@@ -163,6 +194,7 @@
       <aside id="sidebar" class="sidebar">
         <h2>In the room</h2>
         <ul id="people" class="people"></ul>
+        <button id="invite-friends" class="small sidebar-invite">Invite friends</button>
       </aside>
 
       <aside id="playlist" class="playlist">

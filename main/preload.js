@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld('api', {
   stopSession: (sessionId) => ipcRenderer.invoke('session:stop', sessionId),
   subtitleCues: (options) => ipcRenderer.invoke('subtitle:cues', options),
   iceServers: () => ipcRenderer.invoke('net:ice-servers'),
+  setPinned: (pinned) => ipcRenderer.invoke('window:pin', pinned),
 })

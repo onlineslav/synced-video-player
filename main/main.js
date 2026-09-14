@@ -56,6 +56,11 @@ function registerIpc() {
   ipcMain.handle('session:stop', (_event, id) => media.stopSession(id))
   ipcMain.handle('subtitle:cues', (_event, options) => media.subtitleCues(options))
   ipcMain.handle('net:ice-servers', () => loadIceServers(turnConfigPath()))
+  ipcMain.handle('window:pin', (event, pinned) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    win.setAlwaysOnTop(Boolean(pinned), 'floating')
+    return win.isAlwaysOnTop()
+  })
 }
 
 function start() {

@@ -6,7 +6,7 @@ import {normalizeUsername, sign, verifySigned} from './identity.mjs'
 import {cleanDisplayName, cleanText} from './profile.mjs'
 
 const MAX_TITLE_LENGTH = 80
-const ASK_TIMEOUT_MS = 120_000 // how long an ask to join waits for an answer
+const ASK_TIMEOUT_MS = 120_000 // how long an ask to join waits for an answer, and an invite shows as sent
 
 export const inboxRoomId = (username) => `inbox:${username}`
 
@@ -44,6 +44,7 @@ export class FriendNetwork extends EventTarget {
     this.online = new Map() // username -> {link, peerId}
     this.presence = new Map() // username -> cleanStatus(), from their latest profile
     this.asks = new Map() // username -> expiry timer, while waiting to hear if you can join
+    this.invites = new Map() // username -> expiry timer, after inviting them into your room
   }
 
   start(identity, profile) {
@@ -69,7 +70,7 @@ export class FriendNetwork extends EventTarget {
     return [...this.friends.values()].map((friend) => {
       const online = this.online.has(friend.username)
       const status = online ? this.presence.get(friend.username) || null : null
-      return {...friend, online, status, asked: this.asks.has(friend.username)}
+      return {...friend, online, status, asked: this.asks.has(friend.username), invited: this.invites.has(friend.username)}
     })
   }
 
@@ -98,6 +99,25 @@ export class FriendNetwork extends EventTarget {
     const asked = this.asks.delete(username)
     if (asked) this.changed()
     return asked
+  }
+
+  // Invites a friend into the room you're in. It only shows them a card: they choose whether to come.
+  // Returns an error message, or null when sent.
+  inviteToRoom(username, code) {
+    const entry = this.online.get(username)
+    if (!entry) return "They're offline."
+    clearTimeout(this.invites.get(username))
+    const timer = setTimeout(() => this.forgetInvite(username), ASK_TIMEOUT_MS)
+    timer.unref?.()
+    this.invites.set(username, timer)
+    entry.link.actions.join.send({type: 'offer', code}, {target: entry.peerId}).catch(() => {})
+    this.changed()
+    return null
+  }
+
+  forgetInvite(username) {
+    clearTimeout(this.invites.get(username))
+    if (this.invites.delete(username)) this.changed()
   }
 
   requestList() {
@@ -212,6 +232,8 @@ export class FriendNetwork extends EventTarget {
       else if (message?.type === 'invite' && typeof message.code === 'string' && this.forgetAsk(username)) {
         this.emit('join-invite', {...detail, code: message.code})
       } else if (message?.type === 'declined' && this.forgetAsk(username)) this.emit('join-declined', detail)
+      // An offer only asks the person; nothing happens unless they accept it.
+      else if (message?.type === 'offer' && typeof message.code === 'string') this.emit('join-offer', {...detail, code: message.code})
     })
     link.actions.ack.onMessage = onVerified((_ack, username) => {
       const friend = this.friends.get(username)

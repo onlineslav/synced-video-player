@@ -16,7 +16,7 @@ import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
-import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
+import {cleanDisplayName} from './profile.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -126,6 +126,12 @@ const ui = {
   username: $('username'),
   newUsername: $('new-username'),
   openSettings: $('open-settings'),
+  roomSettings: $('room-settings'),
+  friendsToggles: document.querySelectorAll('.friends-toggle'),
+  friends: $('friends'),
+  homeInvites: $('home-invites'),
+  inviteFriends: $('invite-friends'),
+  pinButtons: document.querySelectorAll('[data-pin]'),
   settings: $('settings'),
   settingsUsername: $('settings-username'),
   settingsBack: $('settings-back'),
@@ -322,6 +328,9 @@ async function enterRoom(code) {
   ui.code.textContent = formatRoomCode(code)
   ui.home.hidden = ui.settings.hidden = true
   ui.room.hidden = false
+  ui.room.append(ui.friends)
+  setFriendsOpen(false)
+  renderFriends() // friends get Invite buttons
   setRole('idle')
 }
 
@@ -336,8 +345,11 @@ async function leaveRoom() {
   for (const peerId of [...session.images.keys()]) forgetImage(peerId)
   session = blankSession()
   setRole('idle')
-  ui.room.hidden = true
+  ui.room.hidden = ui.settings.hidden = true
   ui.home.hidden = false
+  ui.home.append(ui.friends)
+  setFriendsOpen(false)
+  renderFriends()
   await room?.leave()
 }
 
@@ -759,8 +771,8 @@ function finishWelcome(next, mode) {
   welcome = null
   ui.welcome.hidden = true
   // A changed username goes back to Settings, where it was changed from.
-  ui.home.hidden = mode === 'change'
-  ui.settings.hidden = mode !== 'change'
+  ui.home.hidden = false
+  showSettings(mode === 'change')
   delete ui.username.dataset.original
   if (mode === 'change') friendNetwork.restart(identity)
   else friendNetwork.start(identity, myProfile())
@@ -832,7 +844,12 @@ function renderFriends() {
         if (confirm(`Remove ${label} from your friends?`)) friendNetwork.remove(friend.username)
       })
       row.append(element('span', 'avatar', label[0].toUpperCase()), main)
-      if (friend.online && friend.status?.inRoom && !session.room) {
+      if (friend.online && session.room) {
+        const invite = element('button', 'small friend-ask', friend.invited ? 'Invited' : 'Invite')
+        invite.disabled = friend.invited
+        invite.addEventListener('click', () => showFriendNotice(friendNetwork.inviteToRoom(friend.username, session.code)))
+        row.append(invite)
+      } else if (friend.online && friend.status?.inRoom) {
         const ask = element('button', 'small friend-ask', friend.asked ? 'Asked…' : 'Ask to join')
         ask.disabled = friend.asked
         ask.addEventListener('click', () => showFriendNotice(friendNetwork.askToJoin(friend.username)))
@@ -843,6 +860,8 @@ function renderFriends() {
     }),
   )
   ui.friendsEmpty.hidden = friends.length + requests.length > 0
+  const online = friends.some((friend) => !['offline', 'pending'].includes(presenceOf(friend)))
+  for (const toggle of ui.friendsToggles) toggle.dataset.dot = requests.length ? 'request' : online ? 'online' : ''
 }
 
 function showFriendNotice(message, {error = true} = {}) {
@@ -870,16 +889,37 @@ function receiveJoinAsk({username, name}) {
   setTimeout(() => card.remove(), 120_000)
 }
 
-async function receiveJoinInvite({name, code}) {
+async function joinFriendRoom(name, code, leaveQuestion) {
   const roomCode = normalizeRoomCode(code)
   if (roomCode.length !== 8 || session.code === roomCode) return
   if (session.room) {
-    if (!confirm(`${name} let you in. Leave this room and join theirs?`)) return
+    if (!confirm(leaveQuestion)) return
     await leaveRoom()
   }
   showFriendNotice(null)
   await enterRoom(roomCode)
   toast(`Joined ${name}'s room`)
+}
+
+const receiveJoinInvite = ({name, code}) => joinFriendRoom(name, code, `${name} let you in. Leave this room and join theirs?`)
+
+// A friend invites you into their room. It's only a card: nothing happens unless you click Join.
+function receiveJoinOffer({username, name, code}) {
+  if (session.code === normalizeRoomCode(code)) return
+  const holder = ui.room.hidden ? ui.homeInvites : ui.joinRequests
+  if ([...holder.children].some((card) => card.dataset.offerFrom === username)) return
+  const card = element('div', 'join-request')
+  card.dataset.offerFrom = username
+  const join = element('button', 'primary small', 'Join')
+  join.addEventListener('click', () => {
+    card.remove()
+    joinFriendRoom(name, code, `Leave this room and join ${name}'s?`)
+  })
+  const notNow = element('button', 'ghost small', 'Not now')
+  notNow.addEventListener('click', () => card.remove())
+  card.append(element('span', null, `${name} invited you to their room`), join, notNow)
+  holder.append(card)
+  setTimeout(() => card.remove(), 120_000)
 }
 
 // ---------- People ----------
@@ -910,23 +950,17 @@ function renderPeople() {
 
   ui.peopleCount.textContent = String(rows.length)
   const signature = JSON.stringify(rows.map(({name, username, self, host, stats}) => [name, username, self, host, stats]))
-  // Don't rebuild the list under someone typing their name into it.
-  if (ui.people.dataset.signature === signature || ui.people.contains(document.activeElement)) return
+  if (ui.people.dataset.signature === signature) return
   ui.people.dataset.signature = signature
   ui.people.replaceChildren(
     ...rows.map(({name, username, self, host, stats}) => {
       const shownName = name || 'Joining…'
       const row = element('li', 'person')
       if (stats.level) row.dataset.level = stats.level
-      const nameLine = element('div', self ? 'person-name self' : 'person-name', self ? null : shownName)
+      // Your own name is changed in Settings, not here.
+      const nameLine = element('div', 'person-name', shownName)
       if (username) nameLine.title = `Username: ${username}`
-      if (self) {
-        const input = element('input', 'name-input')
-        Object.assign(input, {value: myName, maxLength: MAX_NAME_LENGTH, spellcheck: false, title: 'Change your display name'})
-        input.setAttribute('aria-label', 'Your display name')
-        bindNameInput(input)
-        nameLine.append(input, element('span', 'person-tag', 'you'))
-      }
+      if (self) nameLine.append(element('span', 'person-tag', 'you'))
       const statsLine = element('div', 'person-stats', [host ? 'Hosting' : null, stats.text].filter(Boolean).join(' · ') || ' ')
       if (stats.detail) statsLine.title = stats.detail
       const main = element('div', 'person-main')
@@ -1394,6 +1428,13 @@ function control(cmd, value) {
 const togglePlay = () => control(isPlaying() ? 'pause' : 'play')
 const toggleLoop = () => control('loop', !session.loop)
 
+// Plex-style skips: 10 seconds back, 30 forward. The arrow keys do the same.
+function skip(seconds) {
+  const duration = currentDuration()
+  const target = Math.max(0, currentTime() + seconds)
+  control('seek', duration ? Math.min(target, duration) : target)
+}
+
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen()
   else ui.room.requestFullscreen().catch(() => {})
@@ -1728,7 +1769,8 @@ ui.welcomeName.addEventListener('input', updateWelcome)
 ui.welcomeCancel.addEventListener('click', () => {
   welcome = null
   ui.welcome.hidden = true
-  ui.settings.hidden = false
+  ui.home.hidden = false
+  showSettings(true)
 })
 ui.welcomeForm.addEventListener('submit', async (event) => {
   event.preventDefault()
@@ -1748,6 +1790,7 @@ ui.welcomeForm.addEventListener('submit', async (event) => {
 friendNetwork.addEventListener('change', renderFriends)
 friendNetwork.addEventListener('join-ask', ({detail}) => receiveJoinAsk(detail))
 friendNetwork.addEventListener('join-invite', ({detail}) => receiveJoinInvite(detail))
+friendNetwork.addEventListener('join-offer', ({detail}) => receiveJoinOffer(detail))
 friendNetwork.addEventListener('join-declined', ({detail}) => showFriendNotice(`${detail.name} can't let you in right now.`, {error: false}))
 renderFriends()
 
@@ -1773,13 +1816,51 @@ ui.username.addEventListener('click', async () => {
   flashButton(ui.username, copied ? 'Copied' : "Couldn't copy")
 })
 
+// Settings opens over the current screen. In a room it goes inside the room so it shows in fullscreen,
+// and changing your username waits until you leave, because the welcome screen takes the whole window.
 function showSettings(open) {
+  if (open) {
+    const inRoom = !ui.room.hidden
+    const parent = inRoom ? ui.room : document.body
+    parent.append(ui.settings)
+    ui.newUsername.disabled = inRoom
+    ui.newUsername.title = inRoom ? 'Leave the room to change your username' : ''
+  }
   ui.settings.hidden = !open
-  ui.home.hidden = open
 }
 
 ui.openSettings.addEventListener('click', () => showSettings(true))
+ui.roomSettings.addEventListener('click', () => showSettings(true))
 ui.settingsBack.addEventListener('click', () => showSettings(false))
+// Clicking the dimmed backdrop closes it, but a text selection that ends there doesn't.
+let backdropPress = false
+ui.settings.addEventListener('pointerdown', (event) => (backdropPress = event.target === ui.settings))
+ui.settings.addEventListener('click', (event) => {
+  if (backdropPress && event.target === ui.settings) showSettings(false)
+})
+
+// One friends list: it slides in from the left on home, and floats over the video on the left in a
+// room. enterRoom and leaveRoom move it between the two.
+function setFriendsOpen(open) {
+  for (const screen of [ui.home, ui.room]) screen.classList.toggle('friends-open', open)
+  for (const toggle of ui.friendsToggles) toggle.setAttribute('aria-expanded', String(open))
+}
+for (const toggle of ui.friendsToggles) {
+  toggle.addEventListener('click', () => setFriendsOpen(!ui.home.classList.contains('friends-open')))
+}
+ui.inviteFriends.addEventListener('click', () => setFriendsOpen(true))
+
+// Pinned keeps the window above other apps. Home (bottom right) and the player controls each have a button,
+// so you can always unpin from wherever you are.
+let pinned = false
+async function setPinned(next) {
+  pinned = await window.api.setPinned(next).catch(() => pinned)
+  for (const button of ui.pinButtons) {
+    button.setAttribute('aria-pressed', String(pinned))
+    button.title = pinned ? 'Unpin: stop staying on top' : 'Pin: stay on top of other windows'
+  }
+}
+for (const button of ui.pinButtons) button.addEventListener('click', () => setPinned(!pinned))
 ui.newUsername.addEventListener('click', () => showWelcome('change'))
 
 for (const button of ui.openButtons) {
@@ -1790,6 +1871,9 @@ for (const button of ui.openButtons) {
 }
 
 ui.play.addEventListener('click', togglePlay)
+for (const button of document.querySelectorAll('[data-skip]')) {
+  button.addEventListener('click', () => skip(Number(button.dataset.skip)))
+}
 ui.loop.addEventListener('click', toggleLoop)
 ui.localVideo.addEventListener('click', togglePlay)
 ui.remoteVideo.addEventListener('click', togglePlay)
@@ -1955,14 +2039,14 @@ player.addEventListener('loading', () => render())
 player.addEventListener('error', ({detail}) => toast(detail, true))
 
 document.addEventListener('keydown', (event) => {
-  if (ui.room.hidden || event.target.matches('input:not([type=range]), select, textarea')) return
+  if (ui.room.hidden || !ui.settings.hidden || event.target.matches('input:not([type=range]), select, textarea')) return
   if (event.code === 'Space') {
     event.preventDefault()
     if (event.target instanceof HTMLButtonElement) event.target.blur()
     togglePlay()
   } else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
     event.preventDefault()
-    control('seek', currentTime() + (event.code === 'ArrowLeft' ? -10 : 10))
+    skip(event.code === 'ArrowLeft' ? -10 : 30)
   } else if (event.code === 'KeyL') {
     toggleLoop()
   } else if (event.code === 'KeyF') {
@@ -2002,6 +2086,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
   setReactionsOpen(false)
   endItemDrag(false)
+  if (!event.target.matches('input')) showSettings(false) // in the name box, Escape only undoes the edit
 })
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
@@ -2009,6 +2094,7 @@ let chromeTimer = null
 const chromeInUse = () =>
   Boolean(
     drawing ||
+      !ui.settings.hidden ||
       tabDrag ||
       itemDrag ||
       !ui.reactions.hidden ||

@@ -128,7 +128,7 @@ test('a peer claiming someone else’s username is ignored', async () => {
     profile.send({name: 'Totally Bob'}, {target: peerId})
   }
   await new Promise((resolve) => setTimeout(resolve, 100))
-  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false, status: null, asked: false}])
+  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false, status: null, asked: false, invited: false}])
 })
 
 test('friends see each other online, in a room and hosting, and then offline', async () => {
@@ -191,6 +191,27 @@ test('asking to join a room: only an answer to your own ask counts', async () =>
   assert.deepEqual(events.slice(3).map(([who, type]) => [who, type]), [['alice', 'join-declined']], 'a second answer is ignored')
 
   assert.equal(alice.friends.askToJoin('nobody#0000-0000'), "They're offline.")
+  alice.friends.stop()
+  bob.friends.stop()
+})
+
+test('inviting a friend into your room only offers it, and they choose', async () => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bob = await person(net, 'b', 'Bob')
+  alice.friends.add(bob.identity.username)
+  bob.friends.add(alice.identity.username)
+  await until(() => alice.friends.list()[0]?.name === 'Bob' && bob.friends.list()[0]?.name === 'Alice', 'friends')
+
+  const offers = []
+  bob.friends.addEventListener('join-offer', ({detail}) => offers.push(detail))
+  bob.friends.addEventListener('join-invite', () => assert.fail('an offer must not count as an answer to an ask'))
+  assert.equal(alice.friends.inviteToRoom(bob.identity.username, 'ABCDEFGH'), null)
+  assert.ok(alice.friends.list()[0].invited)
+  await until(() => offers.length === 1, 'offer')
+  assert.deepEqual(offers[0], {username: alice.identity.username, name: 'Alice', code: 'ABCDEFGH'})
+
+  assert.equal(alice.friends.inviteToRoom('nobody#0000-0000', 'ABCDEFGH'), "They're offline.")
   alice.friends.stop()
   bob.friends.stop()
 })
