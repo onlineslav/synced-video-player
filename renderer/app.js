@@ -12,6 +12,7 @@ import {
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 import {createIdentity, isValidIdentity, normalizeUsername} from './identity.mjs'
+import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
   BRUSH_SIZES,
@@ -180,7 +181,7 @@ async function enterRoom(code) {
   session.boardAction.onMessage = (message, {peerId}) => receiveBoard(message, peerId)
   session.profileAction.onMessage = (profile, {peerId}) => {
     if (!session.peers.has(peerId)) return
-    person(peerId).name = String(profile?.name || '').slice(0, MAX_NAME_LENGTH) || null
+    person(peerId).name = cleanDisplayName(profile?.name)
     person(peerId).username = normalizeUsername(profile?.username)
     render()
   }
@@ -475,7 +476,6 @@ function viewerTime() {
 
 // ---------- Profile ----------
 
-const MAX_NAME_LENGTH = 40
 let myName = 'Me'
 let identity = null // {username, publicKey, privateKey}
 const myProfile = () => ({name: myName, username: identity?.username || null})
@@ -496,9 +496,34 @@ function saveIdentity(next) {
 }
 
 function renderProfile() {
-  ui.profileName.textContent = myName
+  if (document.activeElement !== ui.profileName) ui.profileName.value = myName
   ui.profileAvatar.textContent = myName.trim()[0]?.toUpperCase() || '?'
   ui.username.textContent = identity?.username || '…'
+}
+
+// The display name is what people see; the username stays the same when it changes.
+function setMyName(input) {
+  const name = cleanDisplayName(input)
+  if (name && name !== myName) {
+    myName = name
+    try {
+      localStorage.setItem('displayName', name)
+    } catch {}
+  }
+  shareProfile()
+  render()
+}
+
+function bindNameInput(input) {
+  input.addEventListener('change', () => {
+    setMyName(input.value)
+    // Show the name as saved: cleaned up, or the previous one if this was blank.
+    input.value = myName
+  })
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') input.value = myName
+    if (event.key === 'Enter' || event.key === 'Escape') input.blur()
+  })
 }
 
 function shareProfile() {
@@ -534,16 +559,23 @@ function renderPeople() {
 
   ui.peopleCount.textContent = String(rows.length)
   const signature = JSON.stringify(rows.map(({name, username, self, host, stats}) => [name, username, self, host, stats]))
-  if (ui.people.dataset.signature === signature) return
+  // Don't rebuild the list under someone typing their name into it.
+  if (ui.people.dataset.signature === signature || ui.people.contains(document.activeElement)) return
   ui.people.dataset.signature = signature
   ui.people.replaceChildren(
     ...rows.map(({name, username, self, host, stats}) => {
       const shownName = name || 'Joining…'
       const row = element('li', 'person')
       if (stats.level) row.dataset.level = stats.level
-      const nameLine = element('div', 'person-name', shownName)
+      const nameLine = element('div', self ? 'person-name self' : 'person-name', self ? null : shownName)
       if (username) nameLine.title = `Username: ${username}`
-      if (self) nameLine.append(element('span', 'person-tag', 'you'))
+      if (self) {
+        const input = element('input', 'name-input')
+        Object.assign(input, {value: myName, maxLength: MAX_NAME_LENGTH, spellcheck: false, title: 'Change your display name'})
+        input.setAttribute('aria-label', 'Your display name')
+        bindNameInput(input)
+        nameLine.append(input, element('span', 'person-tag', 'you'))
+      }
       const statsLine = element('div', 'person-stats', [host ? 'Hosting' : null, stats.text].filter(Boolean).join(' · ') || ' ')
       if (stats.detail) statsLine.title = stats.detail
       const main = element('div', 'person-main')
@@ -904,10 +936,17 @@ try {
   setPeopleOpen(true)
 }
 
+// Until someone picks a display name, it's their computer's user name.
+let savedName = null
+try {
+  savedName = cleanDisplayName(localStorage.getItem('displayName'))
+} catch {}
+if (savedName) myName = savedName
 window.api.userName().then((name) => {
-  if (name) myName = name.slice(0, MAX_NAME_LENGTH)
+  if (!savedName && cleanDisplayName(name)) myName = cleanDisplayName(name)
   shareProfile()
 })
+bindNameInput(ui.profileName)
 loadIdentity().then((loaded) => {
   identity = loaded
   shareProfile()
@@ -1024,7 +1063,7 @@ document.addEventListener('keydown', (event) => {
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
 let chromeTimer = null
 const chromeInUse = () =>
-  Boolean(drawing || ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, select:focus'))
+  Boolean(drawing || ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, select:focus, input:focus'))
 function wakeChrome() {
   ui.room.classList.remove('idle')
   clearTimeout(chromeTimer)

@@ -102,9 +102,39 @@ button.ghost {
 .profile-name {
   font-size: 16px;
   font-weight: 600;
-  overflow: hidden;
+}
+
+/* Names you can edit look like plain text until you hover or click them. */
+.name-input {
+  width: 100%;
+  min-width: 0;
+  margin-left: -7px;
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.name-input:hover {
+  border-color: var(--line);
+}
+
+.name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+.person-name.self {
+  display: flex;
+  align-items: center;
+  overflow: visible;
+}
+
+.person-name.self .name-input {
+  flex: 1;
+  font-size: 14px;
 }
 
 .profile-username {

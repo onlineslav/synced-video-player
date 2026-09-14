@@ -31,7 +31,7 @@
 
 - [x] Unique username (hashed ID) for adding friends
   - Changing it means friends have to re-add you
-- [ ] Changeable display name, separate from the username
+- [x] Changeable display name, separate from the username
 - [ ] Add friends by username
 - [ ] Set or upload a profile photo
 - [ ] See which friends are online and hosting rooms
