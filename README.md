@@ -54,9 +54,12 @@ The two apps connect directly using WebRTC. That works on most home networks wit
 npm install
 npm start        # bundle the renderer and launch the app
 npm test         # unit tests (node:test)
+npm run test:startup # isolated Electron checks for stalled networking and concurrent app profiles
 npm run dist:win # Windows installer in dist/
 npm run dist:mac # Mac .dmg in dist/ (must run on a Mac)
 ```
+
+`npm start` uses a separate **Synced Video Player Development** profile, so it can run alongside the installed app without locking its settings or cache. The development copy asks you to set up its own username on first launch; your installed app keeps its existing identity and friends. Launching the same profile again focuses its existing window.
 
 Starting the **Build** workflow by hand builds Windows, Apple Silicon and Intel Mac installers as workflow artifacts. Pushing a version tag builds them and publishes a GitHub Release:
 

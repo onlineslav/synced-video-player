@@ -111,6 +111,8 @@ for (const method of ['createOffer', 'createAnswer', 'setLocalDescription']) {
 
 const $ = (id) => document.getElementById(id)
 const ui = {
+  startup: $('startup'),
+  startupStatus: $('startup-status'),
   welcome: $('welcome'),
   welcomeForm: $('welcome-form'),
   welcomeTitle: $('welcome-title'),
@@ -794,6 +796,7 @@ async function showWelcome(mode) {
   ui.welcomeName.value = changing ? myName : ''
   ui.welcomeCancel.hidden = !changing
   ui.home.hidden = ui.settings.hidden = true
+  ui.startup.hidden = true
   ui.welcome.hidden = false
   ui.handle.focus()
   updateWelcome()
@@ -814,13 +817,13 @@ async function updateWelcome() {
 function finishWelcome(next, mode) {
   identity = next
   welcome = null
+  ui.startup.hidden = true
   ui.welcome.hidden = true
   // A changed username goes back to Settings, where it was changed from.
   ui.home.hidden = false
   showSettings(mode === 'change')
   delete ui.username.dataset.original
-  if (mode === 'change') friendNetwork.restart(identity)
-  else friendNetwork.start(identity, myProfile())
+  startFriends(identity, mode)
   shareProfile()
 }
 
@@ -842,6 +845,24 @@ const localStore = {
 }
 
 const friendNetwork = new FriendNetwork({joinRoom, selfId, appId: APP_ID, storage: localStore})
+const networkReady = window.api.iceServers().catch(() => [])
+
+// Local screens never wait for TURN credentials or peer discovery. Let the screen
+// paint before Trystero creates its initial pool of WebRTC connections, too.
+async function startFriends(next, mode) {
+  try {
+    const turnConfig = await networkReady
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+    if (identity !== next) return // the username changed while network setup was pending
+    friendNetwork.turnConfig = turnConfig
+    if (mode === 'change') friendNetwork.restart(next)
+    else friendNetwork.start(next, myProfile())
+    friendNetwork.updateProfile(myProfile())
+    renderFriends()
+  } catch (error) {
+    if (identity === next) showFriendNotice(`Could not connect to friends: ${errorMessage(error)}`)
+  }
+}
 
 const presenceOf = (friend) => {
   if (!friend.confirmed) return 'pending'
@@ -851,6 +872,8 @@ const presenceOf = (friend) => {
 const PRESENCE_ORDER = ['hosting', 'room', 'online', 'offline', 'pending']
 
 function renderFriends() {
+  const friendsReady = Boolean(identity && friendNetwork.identity === identity)
+  ui.addFriend.querySelector('button').disabled = !friendsReady
   const requests = friendNetwork.requestList()
   const label = (friend) => friend.name || friend.username
   const friends = friendNetwork
@@ -864,6 +887,7 @@ function renderFriends() {
       main.append(element('div', 'person-name', name || username), element('div', 'person-stats', 'Wants to be friends'))
       main.lastChild.title = `Username: ${username}`
       const accept = element('button', 'primary small', 'Accept')
+      accept.disabled = !friendsReady
       accept.addEventListener('click', () => showFriendNotice(friendNetwork.add(username)))
       const ignore = element('button', 'ghost small', 'Decline')
       ignore.addEventListener('click', () => friendNetwork.ignoreRequest(username))
@@ -910,7 +934,7 @@ function renderFriends() {
   )
   ui.friendsEmpty.hidden = friends.length + requests.length > 0
   const online = friends.filter((friend) => friend.confirmed && friend.online).length
-  ui.friendsOnline.textContent = `${online} online`
+  ui.friendsOnline.textContent = friendsReady ? `${online} online` : 'Connecting…'
   ui.friendRequestsTitle.hidden = !requests.length
   ui.friendRequestsTitle.textContent = `Friend requests (${requests.length})`
   ui.friendNotification.hidden = !requests.length
@@ -1821,13 +1845,13 @@ if (savedName) myName = savedName
 bindNameInput(ui.profileName)
 
 // A new install, or an identity from before usernames had handles, starts on the welcome screen.
-Promise.all([loadIdentity(), window.api.iceServers().catch(() => [])]).then(
-  ([loaded, turnConfig]) => {
-    friendNetwork.turnConfig = turnConfig
-    if (loaded && savedName) finishWelcome(loaded, 'first')
-    else showWelcome('first')
-  },
-)
+loadIdentity().then((loaded) => {
+  if (loaded && savedName) finishWelcome(loaded, 'first')
+  else return showWelcome('first')
+}).catch((error) => {
+  ui.startup.hidden = false
+  ui.startupStatus.textContent = `Could not load your profile: ${errorMessage(error)}. Restart the app to try again.`
+})
 
 // Mac can't install updates itself, so home shows a card when a newer release is out.
 window.api.checkForUpdate().then((update) => {
@@ -1881,7 +1905,7 @@ renderFriends()
 
 ui.addFriend.addEventListener('submit', (event) => {
   event.preventDefault()
-  const error = identity ? friendNetwork.add(ui.friendUsername.value) : 'Still starting up, try again in a moment.'
+  const error = identity && friendNetwork.identity === identity ? friendNetwork.add(ui.friendUsername.value) : 'Friends are still connecting. Try again in a moment.'
   showFriendNotice(error)
   if (!error) {
     ui.friendUsername.value = ''

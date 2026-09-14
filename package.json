@@ -9,6 +9,7 @@
     "bundle": "esbuild renderer/app.js --bundle --format=iife --target=chrome130 --outfile=renderer/bundle.js",
     "start": "npm run bundle && node scripts/electron.js .",
     "test": "node --test",
+    "test:startup": "npm run bundle && node scripts/electron.js scripts/check-startup.js && node scripts/check-profiles.js",
     "dist:win": "npm run bundle && electron-builder --win",
     "dist:mac": "npm run bundle && electron-builder --mac"
   },

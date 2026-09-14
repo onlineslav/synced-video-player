@@ -3,6 +3,7 @@ const {app, BrowserWindow, dialog, ipcMain} = require('electron')
 const media = require('./media')
 const {loadIceServers} = require('./turn')
 const updater = require('./updater')
+const {focusWindow} = require('./startup')
 const IMAGES = require('../shared/images.json')
 
 const MEDIA_EXTENSIONS = [
@@ -68,6 +69,7 @@ function registerIpc() {
 }
 
 function start() {
+  app.on('second-instance', () => focusWindow(BrowserWindow.getAllWindows()[0]))
   app.whenReady().then(() => {
     registerIpc()
     createWindow()
