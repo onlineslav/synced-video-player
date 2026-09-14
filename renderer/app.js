@@ -18,6 +18,7 @@ import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {cleanDisplayName} from './profile.mjs'
+import {cleanRoomDetails, newerRoomDetails, renameRoom} from './room-name.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -168,6 +169,8 @@ const ui = {
   peopleToggle: $('people-toggle'),
   peopleCount: $('people-count'),
   people: $('people'),
+  roomNameForm: $('room-name-form'),
+  roomName: $('room-name'),
   boardToggle: $('board-toggle'),
   board: $('board'),
   pen: $('pen'),
@@ -212,6 +215,8 @@ const player = new StreamPlayer(ui.localVideo)
 
 const blankSession = () => ({
   code: null,
+  details: null,
+  detailsAction: null,
   room: null,
   connection: {joining: false, connectedBefore: false, waitingSince: 0, error: null, hasTurn: false},
   stateAction: null,
@@ -286,6 +291,8 @@ async function openRoom(code, joining) {
     connection,
     code,
     room,
+    details: joining ? null : {name: `${myName}'s Room`, revision: 1, updatedBy: selfId},
+    detailsAction: room.makeAction('room-details'),
     stateAction: room.makeAction('state'),
     commandAction: room.makeAction('command'),
     telemetryAction: room.makeAction('telemetry'),
@@ -295,6 +302,13 @@ async function openRoom(code, joining) {
     reactAction: room.makeAction('react'),
     imageAction: room.makeAction('image'),
     playlistAction: room.makeAction('playlist'),
+  }
+  session.detailsAction.onMessage = (message, {peerId}) => {
+    if (session.room !== room || !session.peers.has(peerId)) return
+    const details = cleanRoomDetails(message)
+    if (!details || !newerRoomDetails(details, session.details)) return
+    session.details = details
+    render()
   }
   session.playlistAction.onMessage = (message, {peerId}) => receivePlaylist(message, peerId)
   session.imageAction.onMessage = (bytes, {peerId, metadata}) => receiveImage(bytes, peerId, metadata)
@@ -317,6 +331,7 @@ async function openRoom(code, joining) {
     connection.connectedBefore = true
     connection.error = null
     session.peers.add(peerId)
+    if (session.details) session.detailsAction.send(session.details, {target: peerId}).catch(() => {})
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
     if (session.board.strokes.size) session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
     if (session.playlist.items.size || session.playlist.removed.size) {
@@ -1023,6 +1038,8 @@ function element(tag, className, text) {
 }
 
 function renderPeople() {
+  if (document.activeElement !== ui.roomName) ui.roomName.value = session.details?.name || ''
+  ui.roomName.placeholder = session.connection.joining ? 'Joining room…' : 'Room name'
   const host = isHost()
   const hostId = host ? selfId : session.hostId
   const me = {id: selfId, self: true, name: myName, username: identity?.username, ...(host ? {sender: session.link?.sender} : {receiver: session.role === 'viewer' ? session.link?.receiver : null})}
@@ -1059,6 +1076,7 @@ function renderPeople() {
 
 function setPeopleOpen(open) {
   ui.room.classList.toggle('people-open', open)
+  ui.peopleToggle.setAttribute('aria-expanded', String(open))
   try {
     localStorage.setItem('peopleOpen', open ? '1' : '0')
   } catch {}
@@ -1701,6 +1719,26 @@ ui.board.addEventListener('pointercancel', endStroke)
 window.addEventListener('resize', () => syncBoardLayout())
 
 ui.peopleToggle.addEventListener('click', () => setPeopleOpen(!ui.room.classList.contains('people-open')))
+function saveRoomName() {
+  if (!session.room) return
+  const details = renameRoom(ui.roomName.value, session.details, selfId)
+  if (details !== session.details) {
+    session.details = details
+    session.detailsAction.send(session.details).catch(() => toast('Room name could not be shared. Try again.', true))
+  }
+  ui.roomName.value = session.details?.name || ''
+}
+ui.roomNameForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  saveRoomName()
+  ui.roomName.blur()
+})
+ui.roomName.addEventListener('change', saveRoomName)
+ui.roomName.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return
+  ui.roomName.value = session.details?.name || ''
+  ui.roomName.blur()
+})
 try {
   setPeopleOpen(localStorage.getItem('peopleOpen') !== '0')
 } catch {
