@@ -10,40 +10,51 @@ export const ERASER = 'erase'
 // Line widths as a fraction of the picture's height.
 export const BRUSH_SIZES = [0.004, 0.008, 0.016, 0.032]
 const ERASER_SCALE = 3 // the eraser is wider than a pen of the same size
-const MAX_COORDINATES = 8000 // per stroke: 4000 points
+export const MAX_COORDINATES = 2048
+export const MAX_STROKES = 256
 
-export const createBoard = () => ({strokes: new Map(), clearedAt: 0})
+export const createBoard = () => ({strokes: new Map(), clearedAt: 0, revision: 0})
+export const orderedStrokes = (board) => [...board.strokes.values()].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-const isCoordinateList = (list) => Array.isArray(list) && list.length % 2 === 0 && list.every(Number.isFinite)
+const isCoordinateList = (list) => Array.isArray(list) && list.length <= MAX_COORDINATES && list.length % 2 === 0 && list.every((v) => Number.isFinite(v) && Math.abs(v) <= 4)
 
 // Strokes arrive in chunks while someone draws. `offset` is the index of the chunk's first
 // coordinate, so a repeated chunk changes nothing. Returns the stroke, or null if rejected.
-export function addStrokeChunk(board, {id, color, size, at, offset = 0, points}) {
-  if (typeof id !== 'string' || !(COLORS.includes(color) || color === ERASER) || !Number.isInteger(size) || !BRUSH_SIZES[size]) return null
+export function addStrokeChunk(board, {id, color, size, at, offset = 0, points} = {}) {
+  if (typeof id !== 'string' || id.length > 100 || !id.length || !Number.isSafeInteger(at) || at >= 2 ** 48 || !(COLORS.includes(color) || color === ERASER) || !Number.isInteger(size) || !BRUSH_SIZES[size]) return null
   if (!(at > board.clearedAt) || !Number.isInteger(offset) || offset < 0 || offset % 2 || !isCoordinateList(points)) return null
   const existing = board.strokes.get(id)
+  if (existing && (existing.at !== at || existing.color !== color || existing.size !== size)) return null
   if (offset > (existing?.points.length ?? 0)) return null
+  board.revision = Math.max(board.revision, at)
+  if (!existing && board.strokes.size >= MAX_STROKES) {
+    const last = orderedStrokes(board).at(-1)
+    if (at > last.at || (at === last.at && id >= last.id)) return null
+    board.strokes.delete(last.id)
+  }
   const stroke = existing || {id, color, size, at, points: []}
   board.strokes.set(id, stroke)
   const end = Math.min(offset + points.length, MAX_COORDINATES)
-  for (let i = offset; i < end; i++) stroke.points[i] = points[i - offset]
+  // Repeated/overlapping chunks cannot rewrite previously accepted coordinates.
+  for (let i = Math.max(offset, stroke.points.length); i < end; i++) stroke.points[i] = points[i - offset]
   return stroke
 }
 
 // Removes every stroke started at or before `at`. Every app applies the same rule, so boards agree
 // even when clocks differ a little.
 export function clearBoard(board, at) {
-  if (!Number.isFinite(at)) return
+  if (!Number.isSafeInteger(at) || at < 0 || at >= 2 ** 48) return
+  board.revision = Math.max(board.revision, at)
   board.clearedAt = Math.max(board.clearedAt, at)
   for (const [id, stroke] of board.strokes) if (stroke.at <= board.clearedAt) board.strokes.delete(id)
 }
 
-export const boardSnapshot = (board) => ({clearedAt: board.clearedAt, strokes: [...board.strokes.values()]})
+export const boardSnapshot = (board) => ({clearedAt: board.clearedAt, strokes: orderedStrokes(board)})
 
 // Someone joining gets a snapshot from everyone already in the room; merging is idempotent.
 export function mergeSnapshot(board, snapshot) {
   clearBoard(board, Number(snapshot?.clearedAt) || 0)
-  for (const stroke of Array.isArray(snapshot?.strokes) ? snapshot.strokes : []) addStrokeChunk(board, {...stroke, offset: 0})
+  for (const stroke of Array.isArray(snapshot?.strokes) ? snapshot.strokes.slice(0, MAX_STROKES) : []) addStrokeChunk(board, {...stroke, offset: 0})
 }
 
 // Where the picture sits inside the stage with object-fit: contain; the whole stage without video.

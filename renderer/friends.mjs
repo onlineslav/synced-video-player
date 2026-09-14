@@ -4,8 +4,11 @@
 // impersonated. `joinRoom` is Trystero's, injected so the protocol can be tested in memory.
 import {normalizeUsername, sign, verifySigned} from './identity.mjs'
 import {cleanDisplayName, cleanText} from './profile.mjs'
+import {isId, messageLimiter} from './protocol.mjs'
 
 const MAX_TITLE_LENGTH = 80
+export const MAX_FRIENDS = 100
+export const MAX_REQUESTS = 100
 const ASK_TIMEOUT_MS = 120_000 // how long an ask to join waits for an answer, and an invite shows as sent
 
 export const inboxRoomId = (username) => `inbox:${username}`
@@ -18,8 +21,10 @@ export const cleanStatus = (status) => ({
 })
 
 // The line under a friend's name.
-export function presenceText({confirmed, requested, online, status, connectionError}) {
+export function presenceText({confirmed, requested, online, status, connectionError, delivery}) {
   if (!confirmed) {
+    if (delivery === 'expired') return 'Request unanswered · retry to send again'
+    if (delivery === 'declined') return 'Request declined'
     if (requested) return 'Request delivered · awaiting acceptance'
     return connectionError ? 'Could not deliver request · still trying' : 'Request queued · waiting for a connection'
   }
@@ -42,8 +47,21 @@ export class FriendNetwork extends EventTarget {
     Object.assign(this, {joinRoom, selfId, appId, storage, turnConfig})
     this.identity = null
     this.profile = {}
-    this.friends = new Map((storage.load('friends') || []).map((f) => [f.username, f]))
-    this.requests = new Map((storage.load('friendRequests') || []).map((r) => [r.username, r]))
+    const saved = (key, limit) => {
+      const value = storage.load(key)
+      return (Array.isArray(value) ? value : []).filter((f) => normalizeUsername(f?.username) === f.username).slice(0, limit)
+    }
+    this.friends = new Map(saved('friends', MAX_FRIENDS).map((f) => [f.username, f]))
+    this.requests = new Map(saved('friendRequests', MAX_REQUESTS).map((r) => [r.username, r]))
+    this.closing = new Map()
+    this.running = false
+    this.incomingAsks = new Map()
+    this.askIds = new Map()
+    this.offerIds = new Map()
+    const declined = storage.load('declinedRequests')
+    this.declined = new Set((Array.isArray(declined) ? declined : []).filter((v) => normalizeUsername(v) === v).slice(0, MAX_REQUESTS))
+    this.allowMessage = messageLimiter(10)
+    this.requestTimer = null
     this.links = new Map() // roomId -> link
     this.online = new Map() // username -> {link, peerId}
     this.presence = new Map() // username -> cleanStatus(), from their latest profile
@@ -54,20 +72,48 @@ export class FriendNetwork extends EventTarget {
   start(identity, profile) {
     this.identity = identity
     this.profile = profile
+    this.running = true
+    clearInterval(this.requestTimer)
+    this.requestTimer = setInterval(() => this.expireRequests(), 15_000)
+    this.requestTimer.unref?.()
     this.syncRooms()
   }
 
   // A new username: everyone has to be asked again.
   restart(identity) {
     for (const roomId of [...this.links.keys()]) this.leave(roomId)
-    for (const friend of this.friends.values()) Object.assign(friend, {confirmed: false, requested: false})
+    for (const friend of this.friends.values()) Object.assign(friend, {confirmed: false, requested: false, delivery: null})
     this.save()
     this.start(identity, this.profile)
     this.changed()
   }
 
   stop() {
-    for (const roomId of [...this.links.keys()]) this.leave(roomId)
+    this.running = false
+    clearInterval(this.requestTimer)
+    const pending = [...this.links.keys()].map((roomId) => this.leave(roomId))
+    return Promise.allSettled(pending)
+  }
+
+  expireRequests(now = Date.now()) {
+    let changed = false
+    for (const friend of this.friends.values()) if (!friend.confirmed && friend.requested) {
+      friend.requestedAt ||= now
+      if (now - friend.requestedAt < ASK_TIMEOUT_MS) continue
+      Object.assign(friend, {requested: false, delivery: 'expired'})
+      changed = true
+    }
+    for (const [name, ask] of this.incomingAsks) if (ask.until < now) this.incomingAsks.delete(name)
+    if (changed) { this.save(); this.syncRooms(); this.changed() }
+  }
+
+  retry(username) {
+    const friend = this.friends.get(username)
+    if (!friend || friend.confirmed) return
+    Object.assign(friend, {requested: false, requestedAt: null, delivery: null})
+    this.save()
+    this.syncRooms()
+    this.changed()
   }
 
   list() {
@@ -77,7 +123,8 @@ export class FriendNetwork extends EventTarget {
       const pair = this.links.get(pairRoomId(this.identity?.username, friend.username))
       const request = this.links.get(inboxRoomId(friend.username))
       const connectionError = !online && (request?.error || pair?.error)
-      return {...friend, online, status, asked: this.asks.has(friend.username), invited: this.invites.has(friend.username), ...(connectionError && {connectionError})}
+      const {requestedAt, ...shown} = friend
+      return {...shown, online, status, asked: this.asks.has(friend.username), invited: this.invites.has(friend.username), ...(connectionError && {connectionError})}
     })
   }
 
@@ -86,10 +133,14 @@ export class FriendNetwork extends EventTarget {
     const entry = this.online.get(username)
     if (!entry) return "They're offline."
     clearTimeout(this.asks.get(username))
-    const timer = setTimeout(() => this.forgetAsk(username), ASK_TIMEOUT_MS)
+    const id = crypto.randomUUID()
+    this.askIds.set(username, id)
+    const timer = setTimeout(() => {
+      if (this.forgetAsk(username)) this.emit('notice', {message: 'No answer to your join request. You can ask again.'})
+    }, ASK_TIMEOUT_MS)
     timer.unref?.()
     this.asks.set(username, timer)
-    entry.link.actions.join.send({type: 'ask'}, {target: entry.peerId}).catch(() => {})
+    entry.link.actions.join.send({type: 'ask', id}, {target: entry.peerId}).catch(() => { if (this.askIds.get(username) === id) { this.forgetAsk(username); this.emit('notice', {message: 'Could not send your join request. Try again.'}) } })
     this.changed()
     return null
   }
@@ -97,13 +148,17 @@ export class FriendNetwork extends EventTarget {
   // Answers a friend's ask with your room code, or null for no.
   answerJoin(username, code) {
     const entry = this.online.get(username)
-    const answer = code ? {type: 'invite', code} : {type: 'declined'}
+    const ask = this.incomingAsks.get(username)
+    if (!ask || ask.until < Date.now()) return
+    this.incomingAsks.delete(username)
+    const answer = code ? {type: 'invite', code, id: ask.id} : {type: 'declined', id: ask.id}
     entry?.link.actions.join.send(answer, {target: entry.peerId}).catch(() => {})
   }
 
   forgetAsk(username) {
     clearTimeout(this.asks.get(username))
     const asked = this.asks.delete(username)
+    this.askIds.delete(username)
     if (asked) this.changed()
     return asked
   }
@@ -114,16 +169,19 @@ export class FriendNetwork extends EventTarget {
     const entry = this.online.get(username)
     if (!entry) return "They're offline."
     clearTimeout(this.invites.get(username))
-    const timer = setTimeout(() => this.forgetInvite(username), ASK_TIMEOUT_MS)
+    const id = crypto.randomUUID()
+    this.offerIds.set(username, id)
+    const timer = setTimeout(() => { this.forgetInvite(username); this.emit('notice', {message: 'Your invitation expired. You can invite them again.'}) }, ASK_TIMEOUT_MS)
     timer.unref?.()
     this.invites.set(username, timer)
-    entry.link.actions.join.send({type: 'offer', code}, {target: entry.peerId}).catch(() => {})
+    entry.link.actions.join.send({type: 'offer', code, id}, {target: entry.peerId}).catch(() => { if (this.offerIds.get(username) === id) { this.forgetInvite(username); this.emit('notice', {message: 'Could not send your invitation. Try again.'}) } })
     this.changed()
     return null
   }
 
   forgetInvite(username) {
     clearTimeout(this.invites.get(username))
+    this.offerIds.delete(username)
     if (this.invites.delete(username)) this.changed()
   }
 
@@ -137,6 +195,8 @@ export class FriendNetwork extends EventTarget {
     if (!username) return "That isn't a username. They look like moviefan#k7qm-x3pa."
     if (username === this.identity?.username) return "That's your own username."
     if (this.friends.has(username)) return 'Already in your friends.'
+    if (this.friends.size >= MAX_FRIENDS) return 'Your friends list is full (100 people).'
+    this.declined.delete(username)
     const name = this.requests.get(username)?.name ?? null
     this.friends.set(username, {username, name, confirmed: false, requested: false})
     this.requests.delete(username)
@@ -155,6 +215,8 @@ export class FriendNetwork extends EventTarget {
   }
 
   ignoreRequest(username) {
+    this.declined.add(username)
+    if (this.declined.size > MAX_REQUESTS) this.declined.delete(this.declined.values().next().value)
     this.requests.delete(username)
     this.save()
     this.changed()
@@ -169,19 +231,19 @@ export class FriendNetwork extends EventTarget {
 
   syncRooms() {
     const me = this.identity?.username
-    if (!me) return
+    if (!me || !this.running) return
     const wanted = new Map([[inboxRoomId(me), {kind: 'inbox'}]])
     for (const friend of this.friends.values()) {
       wanted.set(pairRoomId(me, friend.username), {kind: 'pair', username: friend.username})
-      if (!friend.confirmed && !friend.requested) wanted.set(inboxRoomId(friend.username), {kind: 'request', username: friend.username})
+      if (!friend.confirmed && !friend.requested && !['expired', 'declined'].includes(friend.delivery)) wanted.set(inboxRoomId(friend.username), {kind: 'request', username: friend.username})
     }
     for (const roomId of [...this.links.keys()]) if (!wanted.has(roomId)) this.leave(roomId)
-    for (const [roomId, purpose] of wanted) if (!this.links.has(roomId)) this.join(roomId, purpose)
+    for (const [roomId, purpose] of wanted) if (!this.links.has(roomId) && !this.closing.has(roomId)) this.join(roomId, purpose)
   }
 
   join(roomId, purpose) {
     const config = {appId: this.appId, password: roomId, ...(this.turnConfig.length && {turnConfig: this.turnConfig})}
-    const link = {roomId, ...purpose, peers: new Map(), connectedPeers: new Set(), early: new Map(), actions: {}, error: null}
+    const link = {roomId, ...purpose, peers: new Map(), connectedPeers: new Set(), early: new Map(), actions: {}, error: null, verifying: new Set(), attempts: new Set()}
     const room = this.joinRoom(config, roomId, {onJoinError: ({error}) => {
       if (this.links.get(roomId) !== link) return
       link.error = error
@@ -193,8 +255,9 @@ export class FriendNetwork extends EventTarget {
 
     room.onPeerJoin = (peerId) => {
       if (this.links.get(roomId) !== link) return
+      if (link.connectedPeers.size >= 32) { room.getPeers?.()[peerId]?.close(); return }
       link.connectedPeers.add(peerId)
-      this.sendHello(link, peerId)
+      this.sendHello(link, peerId).catch(() => {})
     }
     room.onPeerLeave = (peerId) => {
       if (this.links.get(roomId) !== link) return
@@ -202,6 +265,8 @@ export class FriendNetwork extends EventTarget {
       const username = link.peers.get(peerId)
       link.peers.delete(peerId)
       link.early.delete(peerId)
+      link.attempts.delete(peerId)
+      link.verifying.delete(peerId)
       // A peer has the same id in every room; only leaving the room you're friends through counts.
       const entry = this.online.get(username)
       if (entry?.link === link && entry.peerId === peerId) {
@@ -210,16 +275,26 @@ export class FriendNetwork extends EventTarget {
       }
     }
     link.actions.hello.onMessage = async (hello, {peerId}) => {
-      const genuine = await verifySigned(hello, helloText(roomId, peerId, this.selfId))
+      // The room caps connections at 32; verify each once without dropping a
+      // legitimate hello just because other participants arrived together.
+      if (this.links.get(roomId) !== link || !link.connectedPeers.has(peerId) || link.peers.has(peerId) || link.attempts.has(peerId)) return
+      link.attempts.add(peerId)
+      link.verifying.add(peerId)
+      let genuine
+      try { genuine = await verifySigned(hello, helloText(roomId, peerId, this.selfId)) }
+      finally { link.verifying.delete(peerId) }
       if (!genuine || this.links.get(roomId) !== link || !link.connectedPeers.has(peerId) || link.peers.has(peerId)) return
       link.peers.set(peerId, hello.username)
       this.verified(link, peerId, hello.username)
       for (const replay of link.early.get(peerId) || []) replay()
       link.early.delete(peerId)
+      link.attempts.delete(peerId)
+      link.verifying.delete(peerId)
     }
     // Anything else waits until its sender's hello has been checked.
     const onVerified = (handler) => (data, {peerId}) => {
       if (this.links.get(roomId) !== link || !link.connectedPeers.has(peerId)) return
+      if (!this.allowMessage(`${roomId}:${peerId}`)) return
       if (link.peers.has(peerId)) return handler(data, link.peers.get(peerId), peerId)
       const queue = link.early.get(peerId) || []
       if (queue.length < MAX_EARLY_MESSAGES) queue.push(() => handler(data, link.peers.get(peerId), peerId))
@@ -228,14 +303,18 @@ export class FriendNetwork extends EventTarget {
     link.actions.profile.onMessage = onVerified((profile, username) => {
       const friend = this.friends.get(username)
       if (link.kind !== 'pair' || username !== link.username || !friend) return
-      friend.name = cleanDisplayName(profile?.name) ?? friend.name
+      const name = cleanDisplayName(profile?.name) ?? friend.name
+      const changed = friend.name !== name
+      friend.name = name
       this.presence.set(username, cleanStatus(profile?.status))
-      this.save()
+      if (changed) this.save()
       this.changed()
     })
     link.actions.request.onMessage = onVerified((request, username, peerId) => {
       if (link.kind !== 'inbox') return
+      if (this.declined.has(username)) { link.actions.ack.send({declined: true}, {target: peerId}).catch(() => {}); return }
       if (!this.friends.has(username)) {
+        if (!this.requests.has(username) && this.requests.size >= MAX_REQUESTS) return
         this.requests.set(username, {username, name: cleanDisplayName(request?.name)})
         this.save()
         this.changed()
@@ -246,18 +325,23 @@ export class FriendNetwork extends EventTarget {
       const friend = this.friends.get(username)
       if (link.kind !== 'pair' || username !== link.username || !friend?.confirmed) return
       const detail = {username, name: friend.name || username}
-      if (message?.type === 'ask') this.emit('join-ask', detail)
+      if (message?.type === 'ask' && isId(message.id)) {
+        this.incomingAsks.set(username, {id: message.id, until: Date.now() + ASK_TIMEOUT_MS})
+        this.emit('join-ask', detail)
+      }
       // Only an answer to your own ask counts, so nobody can pull you into a room.
-      else if (message?.type === 'invite' && typeof message.code === 'string' && this.forgetAsk(username)) {
+      else if (message?.type === 'invite' && /^[A-Z0-9]{8}$/.test(message.code) && message.id === this.askIds.get(username) && this.forgetAsk(username)) {
         this.emit('join-invite', {...detail, code: message.code})
-      } else if (message?.type === 'declined' && this.forgetAsk(username)) this.emit('join-declined', detail)
+      } else if (message?.type === 'declined' && message.id === this.askIds.get(username) && this.forgetAsk(username)) this.emit('join-declined', detail)
       // An offer only asks the person; nothing happens unless they accept it.
-      else if (message?.type === 'offer' && typeof message.code === 'string') this.emit('join-offer', {...detail, code: message.code})
+      else if (message?.type === 'offer' && isId(message.id) && /^[A-Z0-9]{8}$/.test(message.code)) this.emit('join-offer', {...detail, code: message.code})
     })
     link.actions.ack.onMessage = onVerified((_ack, username) => {
       const friend = this.friends.get(username)
       if (link.kind !== 'request' || username !== link.username || !friend) return
-      friend.requested = true
+      friend.requested = !_ack?.declined
+      friend.requestedAt = Date.now()
+      if (_ack?.declined) friend.delivery = 'declined'
       this.save()
       this.syncRooms()
       this.changed()
@@ -269,7 +353,13 @@ export class FriendNetwork extends EventTarget {
     if (!link) return
     this.links.delete(roomId)
     for (const [username, entry] of this.online) if (entry.link === link) this.goOffline(username)
-    link.room.leave()
+    const promise = Promise.resolve().then(() => link.room.leave()).catch(() => {}).finally(() => {
+      if (this.closing.get(roomId) !== promise) return
+      this.closing.delete(roomId)
+      this.syncRooms()
+    })
+    this.closing.set(roomId, promise)
+    return promise
   }
 
   goOffline(username) {
@@ -279,6 +369,9 @@ export class FriendNetwork extends EventTarget {
     this.asks.delete(username)
     clearTimeout(this.invites.get(username))
     this.invites.delete(username)
+    this.askIds.delete(username)
+    this.offerIds.delete(username)
+    this.incomingAsks.delete(username)
   }
 
   async sendHello(link, peerId) {
@@ -310,6 +403,7 @@ export class FriendNetwork extends EventTarget {
   save() {
     this.storage.save('friends', [...this.friends.values()])
     this.storage.save('friendRequests', [...this.requests.values()])
+    this.storage.save('declinedRequests', [...this.declined])
   }
 
   changed() {

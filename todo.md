@@ -4,6 +4,23 @@ change word 'video' to 'media' and allow all media types.
 
 # TODO
 
+Names
+watch3gether
+syncplayer
+mediasync
+syncplay
+watch3gether
+
+- bruh, uwu, air horn
+
+watch3gether
+
+syncplay
+
+Coplayer - Watch Media Together
+
+- right arrow jumps forward 30s, left arrow jumps back 10s
+
 - q: is there a way for the client to like... buffer/cache videos that the host uploads/plays so that if one client has shit internet, they don't get hickups, and the playback between host and client remain really well synced with no dropouts or delays or latency or whatever
 
 - it remembers where you closed it on the last file 

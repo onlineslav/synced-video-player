@@ -172,12 +172,19 @@ function stopAll() {
 }
 
 const cueCache = new Map()
+let cueReads = 0
 
 // Cues [{start, end, text}] for a text subtitle track, or for any subtitle file when filePath is null.
 function subtitleCues({filePath = null, subtitleId}) {
   const key = `${filePath}|${subtitleId}`
   if (!cueCache.has(key)) {
-    const cues = readCues(filePath, subtitleId)
+    if (cueReads >= 4) return Promise.reject(new Error('Several subtitle tracks are loading. Try again shortly.'))
+    cueReads++
+    const cues = readCues(filePath, subtitleId).then((result) => {
+      if (result.length > 30000 || result.reduce((size, cue) => size + cue.text.length, 0) > 2e6) throw new Error('Subtitle track is too large')
+      return result
+    }).finally(() => { cueReads-- })
+    if (cueCache.size >= 16) cueCache.delete(cueCache.keys().next().value)
     cueCache.set(key, cues)
     cues.catch(() => cueCache.delete(key))
   }
@@ -185,6 +192,7 @@ function subtitleCues({filePath = null, subtitleId}) {
 }
 
 async function readCues(filePath, subtitleId) {
+  if (typeof subtitleId !== 'string') throw new Error('Invalid subtitle track')
   let subtitle
   if (subtitleId.startsWith('external:')) {
     subtitle = externalSubtitle(subtitleId.slice('external:'.length))

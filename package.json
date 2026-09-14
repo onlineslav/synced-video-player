@@ -1,15 +1,19 @@
 {
   "name": "synced-video-player",
   "productName": "Synced Video Player",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Watch local video files together. One host streams, everyone stays in sync.",
   "main": "main/index.js",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/patch-trystero.js",
+    "prebundle": "node scripts/patch-trystero.js",
+    "pretest": "node scripts/patch-trystero.js",
     "bundle": "esbuild renderer/app.js --bundle --format=iife --target=chrome130 --outfile=renderer/bundle.js",
     "start": "npm run bundle && node scripts/electron.js .",
     "test": "node --test",
     "test:startup": "npm run bundle && node scripts/electron.js scripts/check-startup.js && node scripts/check-profiles.js",
+    "test:network": "node scripts/patch-trystero.js && node scripts/electron.js scripts/check-network.js",
     "dist:win": "npm run bundle && electron-builder --win",
     "dist:mac": "npm run bundle && electron-builder --mac"
   },
@@ -22,9 +26,10 @@
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
-    "trystero": "^0.25.4"
+    "trystero": "0.25.4"
   },
   "build": {
+    "beforePack": "./scripts/check-turn-config.js",
     "appId": "app.syncedvideoplayer",
     "productName": "Synced Video Player",
     "publish": {

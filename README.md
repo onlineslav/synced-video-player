@@ -1,11 +1,11 @@
 # Synced Video Player
 
-Watch or listen to a media file together from two computers (Windows or Mac, in any combination). One person hosts and streams the file. Either person can play, pause, seek, or switch the audio track, and both see the change.
+Watch or listen to a media file together on Windows or Mac, with up to eight people. One person hosts and streams the file. Anyone can play, pause, seek, or switch the audio track, and everyone sees the change.
 
 - Plays almost anything VLC plays (MKV, HEVC, AV1, AC3/DTS/TrueHD audio, XviD, 10-bit, HDR), plus audio files (MP3, FLAC, WAV, M4A, Opus…), because ffmpeg is bundled.
 - Pictures (JPG, PNG, GIF, WebP, AVIF, TIFF, PSD…, up to 50 MB) are sent to the other person at full resolution, so you can both look and draw on them.
 - Subtitles: tracks inside the file, `.srt`/`.ass`/`.ssa`/`.vtt` files next to the video, or any subtitle file you drop in. Each person picks their own track, or none. Image subtitles (Blu-ray PGS, DVD VobSub) can only be drawn into the picture, so those show for everyone.
-- No accounts, no port forwarding, no servers to run.
+- No accounts or port forwarding. Direct connections need no server setup; restrictive networks need a configured TURN relay.
 
 ## Using it
 
@@ -40,13 +40,23 @@ Once accepted, the friends list shows an online count and each friend's **Online
 
 ## Connection problems
 
-The two apps connect directly using WebRTC. That works on most home networks with no setup. Some networks block direct connections: mobile hotspots, some ISPs using CGNAT, and corporate or university Wi-Fi. There the apps stay on "Waiting for your friend…". The fix is a TURN relay that forwards traffic between the two apps. Cloudflare's is free up to 1,000 GB a month:
+The apps connect directly using WebRTC. Networks that block direct connections need a TURN relay. The desktop uses short-lived credentials from an HTTPS endpoint, renews them before expiry, and retries failed requests in the background. It also attempts reconnection after a network change or waking from sleep.
 
-1. In the Cloudflare dashboard, go to **Realtime → TURN Server** and create a TURN key.
-2. Copy `config/turn.example.json` to `config/turn.json` and fill in the key ID and API token.
-3. Rebuild. For CI builds, save the contents of that file as a repository secret named `TURN_CONFIG`.
+1. Deploy the small credential service described in [relay/README.md](relay/README.md). The TURN API token stays on that service.
+2. Copy `config/turn.example.json` to `config/turn.json` and set its `endpoint` to your service's HTTPS `/credentials` URL.
+3. Rebuild. For CI builds, save this endpoint-only JSON as the repository secret `TURN_CONFIG`.
 
-`config/turn.json` can also hold a static list in the form `{"iceServers": [{"urls": "turn:…", "username": "…", "credential": "…"}]}`.
+Builds reject configuration containing API tokens or static credentials. Private installations can put a static `iceServers` list in their own application user-data `turn.json`; see the relay setup notes. If a previous release included a minting token, revoke it when migrating.
+
+### Playback and synchronization
+
+Playback quality adjusts automatically for each viewer. Repeated packet loss or freezes lower the video bitrate and resolution; sustained good conditions let them recover. The video ceiling is 10 Mbps per viewer, subject to an 18 Mbps aggregate budget, with a maximum target of 1080p. Receiver buffering targets 250-750 ms. Clock measurements account for control-message transit time, and captions account for estimated media delay. This remains live streaming: viewer delay can vary with the network and decoder, and frame-exact synchronization is not guaranteed.
+
+These are automatic defaults, not controls in Settings. The connection indicator explains packet loss, upload/CPU limits and relay usage. A host that stops responding is shown as stalled after eight seconds; a failed media open produces an error for everyone.
+
+Rooms support up to eight people. Host changes, playlist moves and board clears use logical revisions so computer clock differences do not decide whose changes win. The board holds 256 strokes (clear it to draw more), the playlist retains up to 4,096 current/deleted item IDs per room, and friends and pending requests each have a 100-person limit. Unanswered friend requests expire with a Retry option.
+
+This networking protocol is incompatible with older builds; everyone in a room or friend connection needs the updated app. Existing local identities and friend lists are retained.
 
 ## Development
 
@@ -55,6 +65,7 @@ npm install
 npm start        # bundle the renderer and launch the app
 npm test         # unit tests (node:test)
 npm run test:startup # isolated Electron checks for stalled networking and concurrent app profiles
+npm run test:network # three local WebRTC peers: friends, rooms, media, controls and rejoining
 npm run dist:win # Windows installer in dist/
 npm run dist:mac # Mac .dmg in dist/ (must run on a Mac)
 ```

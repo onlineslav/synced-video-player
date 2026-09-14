@@ -1,0 +1,10 @@
+{
+  "name": "synced-video-relay",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-14",
+  "ratelimits": [{
+    "name": "RATE_LIMITER",
+    "namespace_id": "71004",
+    "simple": {"limit": 10, "period": 60}
+  }]
+}

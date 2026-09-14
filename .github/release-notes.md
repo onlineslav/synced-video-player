@@ -1,13 +1,14 @@
-## What's new in 0.2.0
+## What's new in 0.3.0
 
-- **Friends:** pick a username, add friends, see who's online or hosting, ask to join their room or invite them into yours.
-- **Playlist:** anyone can add files, drag to reorder, and the next one plays when a file ends.
-- **More than video:** open audio files and pictures (sent at full resolution).
-- **Draw together** on a whiteboard over the video, with an eraser.
-- **Reactions:** air horn, golf clap, quack and confetti.
-- **Your own subtitles:** each person picks their own subtitle track, or none.
-- **Player:** synced loop, mute, volume up to 200%, keep the window on top, and controls that hide while playing.
-- **Updates:** from this version on, Windows updates itself. Macs show a download button when a new version is out.
+**Everyone needs 0.3.0.** It can't connect to older versions. Windows 0.2.0 updates itself; on a Mac, use the download button on the home screen.
+
+- **Up to eight people** in a room.
+- **Smoother playback:** video quality adjusts for each viewer's connection, and play/pause/seek and subtitles line up more closely.
+- **Clearer connection info:** the indicator explains packet loss, slow uploads and relay use. A host that stops responding shows as stalled, and a file that fails to open shows an error for everyone.
+- **Friends:** friend requests and who's online are easier to see, and unanswered requests expire with a Retry button.
+- **Room name:** view and edit it from the couch panel.
+- **Safer rooms:** people must prove who they are to join, and nobody in a room can make your app open files or links.
+- **Faster startup:** no more stalls while connecting.
 
 ## Download
 

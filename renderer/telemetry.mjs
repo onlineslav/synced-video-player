@@ -1,29 +1,29 @@
 // Connection health: what the viewer is actually receiving, what the host is able to send,
 // and how much the viewer buffers to ride out a shaky connection. Pure functions only.
 
-// Latency doesn't matter when both people watch the same stream, so trade some for smoothness.
-// Each step up delays the viewer's picture (and how quickly pauses show) by that much.
+// Bound viewer delay; persistent congestion also reduces the sender's quality ceiling.
 export const MIN_BUFFER_MS = 250
-export const MAX_BUFFER_MS = 1500
+export const MAX_BUFFER_MS = 750
 const CALM_BEFORE_SHRINK_MS = 30_000
 const SHRINK_STEP_MS = 250
 
 // The busiest stream wins: stale entries from a replaced stream stop reporting framesPerSecond.
 const busiest = (a, b) => ((b.framesPerSecond || 0) > (a?.framesPerSecond || 0) ? b : a || b)
 
-export function readStats(report) {
+export function readStats(report, {audioOnly = false} = {}) {
   const byId = new Map()
   report.forEach((s) => byId.set(s.id, s))
   let inbound = null
   let outbound = null
   let pair = null
   report.forEach((s) => {
-    if (s.type === 'inbound-rtp' && s.kind === 'video') inbound = busiest(inbound, s)
-    else if (s.type === 'outbound-rtp' && s.kind === 'video') outbound = busiest(outbound, s)
+    if (s.type === 'inbound-rtp' && s.kind === (audioOnly ? 'audio' : 'video')) inbound = busiest(inbound, s)
+    else if (s.type === 'outbound-rtp' && s.kind === (audioOnly ? 'audio' : 'video')) outbound = busiest(outbound, s)
     else if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s
   })
   const candidateTypes = pair ? [byId.get(pair.localCandidateId), byId.get(pair.remoteCandidateId)].map((c) => c?.candidateType) : []
   return {
+    ...(pair?.availableOutgoingBitrate != null && {capacity: pair.availableOutgoingBitrate}),
     rttMs: pair?.currentRoundTripTime != null ? Math.round(pair.currentRoundTripTime * 1000) : null,
     relayed: candidateTypes.includes('relay'),
     inbound: inbound && {

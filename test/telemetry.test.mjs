@@ -43,6 +43,15 @@ test('readStats picks the live streams and the active connection', () => {
   assert.deepEqual(stats.outbound, {fps: 24, height: 1080, limit: 'cpu'})
 })
 
+test('audio-only telemetry uses audio packets even after a video stream was replaced', () => {
+  const stats = readStats([...report, {id: 'audio', type: 'inbound-rtp', kind: 'audio', ssrc: 3, packetsReceived: 200, packetsLost: 5, jitter: 0.02}], {audioOnly: true})
+  assert.equal(stats.inbound.ssrc, 3)
+  assert.equal(stats.inbound.packetsLost, 5)
+  assert.equal(stats.inbound.jitterMs, 20)
+  assert.equal(stats.inbound.height, 0)
+  assert.equal(stats.outbound, null)
+})
+
 test('inboundDelta measures loss and ignores replaced streams', () => {
   const a = {ssrc: 2, packetsReceived: 100, packetsLost: 0, freezeCount: 0, framesDropped: 0}
   const b = {ssrc: 2, packetsReceived: 190, packetsLost: 10, freezeCount: 1, framesDropped: 2}

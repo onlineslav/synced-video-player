@@ -1,4 +1,8 @@
 import {joinRoom, selfId} from 'trystero'
+import {PROTOCOL, MAX_PEERS, HOST_TIMEOUT_MS, isRevision, nextRevision, sameClaim, newerClaim, acceptsState, cleanState, cleanTelemetry, cleanCues, validCommand, SubtitleCatalog, messageLimiter, sessionHandler} from './protocol.mjs'
+import {createNetwork} from './network.mjs'
+import {authenticateRoomPeer} from './room-auth.mjs'
+import {estimatedMediaTime, updateClock, chooseSendQuality, aggregateLinks} from './sync.mjs'
 import {
   errorMessage,
   formatRoomCode,
@@ -6,7 +10,6 @@ import {
   generateRoomCode,
   isImageMime,
   isImagePath,
-  isNewerClaim,
   MAX_IMAGE_BYTES,
   normalizeRoomCode,
   preferHighStartBitrate,
@@ -17,7 +20,7 @@ import {StreamPlayer} from './player.mjs'
 import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
-import {cleanDisplayName} from './profile.mjs'
+import {cleanDisplayName, cleanText} from './profile.mjs'
 import {cleanRoomDetails, newerRoomDetails, renameRoom} from './room-name.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
@@ -49,6 +52,8 @@ import {
   boardSnapshot,
   clearBoard,
   createBoard,
+  orderedStrokes,
+  MAX_COORDINATES,
   drawStroke,
   ERASER,
   mergeSnapshot,
@@ -66,7 +71,7 @@ import {
   readStats,
 } from './telemetry.mjs'
 
-const APP_ID = 'synced-video-player-7c1e4b'
+const APP_ID = 'synced-video-player-7c1e4b-v2'
 const STATE_INTERVAL_MS = 1000
 const VIDEO_MAX_BITRATE = 10_000_000
 const AUDIO_MAX_BITRATE = 256_000
@@ -217,6 +222,23 @@ const blankSession = () => ({
   code: null,
   details: null,
   detailsAction: null,
+  closed: false,
+  lifetime: new AbortController(),
+  ownFiles: new Map(),
+  catalog: new SubtitleCatalog(),
+  authority: null,
+  sequence: 0,
+  mediaError: null,
+  sendPending: false,
+  sendDirty: false,
+  imageSend: null,
+  imageTransfers: new Map(),
+  imageRetryAt: 0,
+  receiveLimits: messageLimiter(),
+  clock: null,
+  sampling: false,
+  frameDelayMs: null,
+  lastFrameAt: 0,
   room: null,
   connection: {joining: false, connectedBefore: false, waitingSince: 0, error: null, hasTurn: false},
   stateAction: null,
@@ -259,7 +281,9 @@ let session = blankSession()
 // ---------- Room ----------
 
 let enteringRoom = false
+let leavingRoom = null
 async function enterRoom(code, {joining = true} = {}) {
+  if (leavingRoom) await leavingRoom
   if (enteringRoom || session.room) return
   enteringRoom = true
   ui.create.disabled = ui.joinForm.querySelector('button').disabled = true
@@ -275,13 +299,26 @@ async function enterRoom(code, {joining = true} = {}) {
 }
 
 async function openRoom(code, joining) {
-  const turnConfig = await window.api.iceServers().catch(() => [])
+  await network.ready
+  if (!identity) throw new Error('Finish setting up your profile first')
+  const {turnConfig} = network.config()
+  const peerIdentities = new Map()
+  const verifying = new Set()
   const connection = {
     joining, connectedBefore: false, waitingSince: performance.now(), error: null,
     hasTurn: turnConfig.some(({urls}) => [].concat(urls).some((url) => /^turns?:/i.test(url))),
   }
-  const room = joinRoom({appId: APP_ID, password: code, ...(turnConfig.length && {turnConfig})}, code, {
-    onJoinError: ({error}) => {
+  const room = joinRoom({appId: APP_ID, password: code, ...network.config()}, code, {
+    onPeerHandshake: async (peerId, send, receive) => {
+      if (verifying.size + peerIdentities.size >= MAX_PEERS) throw new Error('Room is full (8 people)')
+      verifying.add(peerId)
+      try {
+        const username = await authenticateRoomPeer(identity, selfId, code, peerId, send, receive)
+        peerIdentities.set(peerId, username)
+      } finally { verifying.delete(peerId) }
+    },
+    onJoinError: ({error, peerId}) => {
+      if (peerId) { peerIdentities.delete(peerId); verifying.delete(peerId) }
       connection.error = error
       if (session.connection === connection) render()
     },
@@ -297,12 +334,23 @@ async function openRoom(code, joining) {
     commandAction: room.makeAction('command'),
     telemetryAction: room.makeAction('telemetry'),
     cuesAction: room.makeAction('cues', {kind: 'request'}),
+    clockAction: room.makeAction('clock', {kind: 'request'}),
     profileAction: room.makeAction('profile'),
     boardAction: room.makeAction('board'),
     reactAction: room.makeAction('react'),
     imageAction: room.makeAction('image'),
     playlistAction: room.makeAction('playlist'),
   }
+  const current = session
+  const guard = (handler, options) => sessionHandler(current, () => session, handler, options)
+  const limited = (action, handler, options) => guard((data, context) => {
+    if (!current.receiveLimits(`${context.peerId}:${action}`)) {
+      if (options?.request) throw new Error('Too many requests')
+      return
+    }
+    return handler(data, context)
+  }, options)
+  session.clockAction.onRequest = limited('clock', () => ({now: performance.now()}), {request: true})
   session.detailsAction.onMessage = (message, {peerId}) => {
     if (session.room !== room || !session.peers.has(peerId)) return
     const details = cleanRoomDetails(message)
@@ -310,21 +358,26 @@ async function openRoom(code, joining) {
     session.details = details
     render()
   }
-  session.playlistAction.onMessage = (message, {peerId}) => receivePlaylist(message, peerId)
-  session.imageAction.onMessage = (bytes, {peerId, metadata}) => receiveImage(bytes, peerId, metadata)
+  session.playlistAction.onMessage = limited('playlist', (message, {peerId}) => receivePlaylist(message, peerId))
+  session.imageAction.onMessage = limited('image', (bytes, {peerId, metadata}) => receiveImage(bytes, peerId, metadata))
   // Arrives per 16KB chunk, so it's only stored; the regular render picks it up.
-  session.imageAction.onReceiveProgress = (percent, {peerId, metadata}) => {
-    if (peerId === session.hostId && typeof metadata?.id === 'string') session.imageProgress = {id: metadata.id, percent}
-  }
-  session.reactAction.onMessage = (message, {peerId}) => receiveReaction(message?.kind, peerId)
-  session.cuesAction.onRequest = ({id}) => hostCues(id)
-  session.boardAction.onMessage = (message, {peerId}) => receiveBoard(message, peerId)
-  session.profileAction.onMessage = (profile, {peerId}) => {
-    if (!session.peers.has(peerId)) return
+  session.imageAction.onReceiveProgress = guard((percent, {peerId, metadata}) => {
+    if (peerId === session.hostId && metadata?.id === session.remote?.image?.id) session.imageProgress = {id: metadata.id, percent}
+  })
+  session.reactAction.onMessage = limited('react', (message, {peerId}) => receiveReaction(message?.kind, peerId))
+  session.cuesAction.onRequest = limited('cues', async (request) => {
+    if (!sameClaim(request, {hostId: selfId, claimedAt: current.claimedAt})) throw new Error('Media has changed')
+    const catalog = current.catalog
+    const cues = await hostCues(request.id)
+    if (session !== current || current.closed || current.catalog !== catalog) throw new Error('Media has changed')
+    return cleanCues(cues)
+  }, {request: true})
+  session.boardAction.onMessage = limited('board', (message, {peerId}) => receiveBoard(message, peerId))
+  session.profileAction.onMessage = limited('profile', (profile, {peerId}) => {
     person(peerId).name = cleanDisplayName(profile?.name)
-    person(peerId).username = normalizeUsername(profile?.username)
+    person(peerId).username = peerIdentities.get(peerId) || null
     render()
-  }
+  })
 
   room.onPeerJoin = (peerId) => {
     if (session.room !== room) return
@@ -333,13 +386,14 @@ async function openRoom(code, joining) {
     session.peers.add(peerId)
     if (session.details) session.detailsAction.send(session.details, {target: peerId}).catch(() => {})
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
-    if (session.board.strokes.size) session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
+    session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
     if (session.playlist.items.size || session.playlist.removed.size) {
       session.playlistAction.send({type: 'sync', ...playlistSnapshot(session.playlist)}, {target: peerId}).catch(() => {})
     }
-    toast('Friend connected')
+    person(peerId).username = peerIdentities.get(peerId) || null
+    toast('Participant connected')
     if (session.role === 'host') {
-      if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId})).then(tuneSenders, () => {})
+      if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId, metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
       if (session.image) sendImage(peerId)
       broadcastState(peerId)
     }
@@ -349,6 +403,7 @@ async function openRoom(code, joining) {
   room.onPeerLeave = (peerId) => {
     if (session.room !== room) return
     session.peers.delete(peerId)
+    peerIdentities.delete(peerId)
     if (!session.peers.size) {
       connection.waitingSince = performance.now()
       connection.error = null
@@ -359,30 +414,38 @@ async function openRoom(code, joining) {
     if (session.role === 'viewer' && peerId === session.hostId) {
       session.hostId = null
       session.remote = null
-      ui.remoteVideo.srcObject = null
+      detachRemoteStream()
       setRole('idle')
     }
-    toast('Friend left')
+    toast('Participant left')
     render()
   }
 
-  room.onPeerStream = (stream, peerId) => {
-    if (session.room !== room) return
-    session.peerStreams.set(peerId, stream)
+  room.onPeerStream = (stream, peerId, metadata) => {
+    if (session.room !== room || !session.peers.has(peerId) || !isRevision(metadata?.claimedAt)) return
+    const previous = session.peerStreams.get(peerId)
+    if (previous?.claimedAt > metadata.claimedAt) return
+    session.peerStreams.set(peerId, {stream, claimedAt: metadata.claimedAt})
     applyViewerBuffer(room.getPeers()[peerId])
     attachRemoteStream()
   }
 
-  session.stateAction.onMessage = (state, {peerId}) => receiveState(state, peerId)
-  session.commandAction.onMessage = ({cmd, value}) => {
-    if (session.role === 'host') applyCommand(cmd, value)
-  }
-  session.telemetryAction.onMessage = (receiver, {peerId}) => {
-    if (session.role !== 'host' || !session.peers.has(peerId)) return
-    person(peerId).receiver = receiver
-    session.link = {...session.link, receiver}
-    render()
-  }
+  session.stateAction.onMessage = limited('state', (state, {peerId}) => receiveState(state, peerId))
+  session.commandAction.onMessage = limited('command', (message) => {
+    if (session.role === 'host' && sameClaim(message, {hostId: selfId, claimedAt: session.claimedAt})) applyCommand(message.cmd, message.value)
+  })
+  session.telemetryAction.onMessage = limited('telemetry', (message, {peerId}) => {
+    if (!isHost() || !sameClaim(message, {hostId: selfId, claimedAt: session.claimedAt})) return
+    const receiver = cleanTelemetry(message.receiver)
+    if (receiver) { person(peerId).receiver = receiver; person(peerId).receiverAt = performance.now() }
+  })
+  session.imageRequest = room.makeAction('get-image')
+  session.imageRequest.onMessage = limited('get-image', (message, {peerId}) => {
+    if (isHost() && message?.id === session.image?.id && performance.now() - (person(peerId).imageRequestedAt || -Infinity) > 10_000) {
+      person(peerId).imageRequestedAt = performance.now()
+      sendImage(peerId)
+    }
+  })
 
   window.api.setInRoom(true)
   ui.code.textContent = formatRoomCode(code)
@@ -395,14 +458,21 @@ async function openRoom(code, joining) {
 }
 
 async function leaveRoom() {
-  const room = session.room
+  if (leavingRoom) return leavingRoom
+  const current = session
+  current.closed = true
+  current.lifetime.abort()
+  current.imageSend?.abort()
+  current.captions.controller?.abort()
+  current.ownFiles.clear()
+  endStroke()
   player.close()
   unpublishStream()
-  ui.remoteVideo.srcObject = null
+  detachRemoteStream()
   ui.joinRequests.replaceChildren()
   ui.reactionFeed.replaceChildren()
   clearHostImage()
-  for (const peerId of [...session.images.keys()]) forgetImage(peerId)
+  for (const peerId of [...current.images.keys()]) forgetImage(peerId)
   session = blankSession()
   setRole('idle')
   ui.room.hidden = ui.settings.hidden = true
@@ -410,8 +480,13 @@ async function leaveRoom() {
   ui.home.append(ui.friends, ui.friendNotification)
   setFriendsOpen(false)
   renderFriends()
-  await room?.leave()
-  window.api.setInRoom(false) // a downloaded update installs now
+  ui.create.disabled = ui.joinForm.querySelector('button').disabled = true
+  leavingRoom = Promise.resolve().then(() => current.room?.leave()).catch((error) => toast(errorMessage(error), true)).finally(() => {
+    leavingRoom = null
+    ui.create.disabled = ui.joinForm.querySelector('button').disabled = false
+    window.api.setInRoom(false)
+  })
+  return leavingRoom
 }
 
 function setRole(role) {
@@ -424,26 +499,38 @@ function setRole(role) {
 
 // `item` is the playlist item this file was started from, if any.
 async function hostFile(filePath, item = null) {
-  if (!session.room) return
-  const claimedAt = (session.claimedAt = Date.now())
+  if (!session.room || session.closed) return
+  const current = session
+  const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt)
+  stopHosting()
+  session.claimedAt = claimedAt
+  session.authority = {hostId: selfId, claimedAt, sequence: 0}
+  session.sequence = 0
+  session.catalog = new SubtitleCatalog()
+  session.mediaError = null
   session.playing = item && {id: item.id, position: item.position}
   session.hostId = selfId
   session.remote = null
-  ui.remoteVideo.srcObject = null
-  clearHostImage()
+  detachRemoteStream()
   setRole('host')
   broadcastState()
   if (isImagePath(filePath)) return hostImage(filePath, claimedAt)
   try {
-    if (await player.open(filePath)) ui.localVideo.play().catch(() => {})
+    const opened = await player.open(filePath)
+    if (session !== current || current.closed || current.claimedAt !== claimedAt || !isHost()) return
+    if (opened) ui.localVideo.play().catch((error) => {
+      if (session === current && !current.closed && current.claimedAt === claimedAt && isHost()) failHosting(error)
+    })
   } catch (err) {
-    toast(errorMessage(err), true)
-    if (!player.loaded) stopHosting()
+    if (session !== current || current.closed || current.claimedAt !== claimedAt || !isHost()) return
+    failHosting(err)
   }
   broadcastState()
 }
 
 function stopHosting() {
+  session.imageSend?.abort()
+  session.captions.controller?.abort()
   player.close()
   unpublishStream()
   clearHostImage()
@@ -457,38 +544,54 @@ const hostedTitle = () => session.image?.name || player.media?.title || player.m
 // A picture isn't streamed: the host sends the file itself, so everyone sees it at full resolution.
 
 async function hostImage(filePath, claimedAt) {
+  const current = session
   player.close()
   unpublishStream()
   try {
     const {name, mime, bytes} = await window.api.readImage(filePath)
-    if (session.claimedAt !== claimedAt || !isHost()) return
+    if (session !== current || current.closed || session.claimedAt !== claimedAt || !isHost()) return
     const url = URL.createObjectURL(new Blob([bytes], {type: mime}))
     session.image = {id: String(claimedAt), name, mime, bytes, url}
     sendImage()
   } catch (err) {
-    if (session.claimedAt !== claimedAt || !isHost()) return
+    if (session !== current || current.closed || session.claimedAt !== claimedAt || !isHost()) return
     toast(errorMessage(err), true)
-    stopHosting()
+    failHosting(err)
   }
   broadcastState()
 }
 
 function sendImage(target) {
-  const {id, name, mime, bytes} = session.image
-  session.imageAction.send(bytes, {metadata: {id, name, mime}, ...(target && {target})}).catch(() => {})
+  if (!session.image || session.closed) return
+  const current = session
+  current.imageSend ??= new AbortController()
+  const controller = current.imageSend
+  const {id, name, mime, bytes} = current.image
+  for (const peerId of target ? [target] : current.peers) {
+    if (current.imageTransfers.has(peerId)) continue
+    const transfer = current.imageAction.send(bytes, {metadata: {id, name, mime, claimedAt: current.claimedAt}, signal: controller.signal, target: peerId})
+      .catch((error) => { if (session === current && !controller.signal.aborted) toast(`Picture transfer failed: ${errorMessage(error)}. The viewer can retry.`, true) })
+      .finally(() => { if (current.imageTransfers.get(peerId) === transfer) current.imageTransfers.delete(peerId) })
+    current.imageTransfers.set(peerId, transfer)
+  }
 }
 
 function clearHostImage() {
+  session.imageSend?.abort()
+  session.imageSend = null
+  session.imageTransfers.clear()
   if (session.image) URL.revokeObjectURL(session.image.url)
   session.image = null
 }
 
 // Kept per sender until they send another, so a picture that arrives before its state still shows.
 function receiveImage(bytes, peerId, metadata) {
-  const {id, mime} = metadata || {}
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_IMAGE_BYTES || typeof id !== 'string' || !isImageMime(mime)) return
+  const {id, mime, claimedAt} = metadata || {}
+  if (!session.peers.has(peerId) || !(bytes instanceof Uint8Array) || bytes.byteLength > MAX_IMAGE_BYTES || !isRevision(claimedAt) || id !== String(claimedAt) || !isImageMime(mime)) return
+  if (session.images.get(peerId)?.claimedAt >= claimedAt) return
+  if (session.authority && !sameClaim({hostId: peerId, claimedAt}, session.authority) && !newerClaim({hostId: peerId, claimedAt}, session.authority)) return
   forgetImage(peerId)
-  session.images.set(peerId, {id, url: URL.createObjectURL(new Blob([bytes], {type: mime}))})
+  session.images.set(peerId, {id, claimedAt, url: URL.createObjectURL(new Blob([bytes], {type: mime}))})
   render()
 }
 
@@ -534,9 +637,9 @@ function publishStream() {
     if (session.stream !== stream || !usable(track)) return track.stop()
     if (track.kind === 'video') track.contentHint = 'motion'
     stream.addTrack(track)
-    Promise.all(session.room.addTrack(track, stream)).then(tuneSenders, () => {})
+    Promise.all(session.room.addTrack(track, stream, {metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
   })
-  if (session.peers.size) Promise.all(session.room.addStream(stream)).then(tuneSenders, () => {})
+  if (session.peers.size) Promise.all(session.room.addStream(stream, {metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
 }
 
 function unpublishStream() {
@@ -553,31 +656,47 @@ function unpublishStream() {
 
 // Raise WebRTC's conservative defaults so a movie looks and sounds like a movie.
 async function tuneSenders() {
-  for (const pc of Object.values(session.room?.getPeers() || {})) {
-    for (const sender of pc.getSenders()) {
-      const track = sender.track
-      const params = sender.getParameters()
-      if (!track || !params.encodings?.length) continue
-      const encoding = params.encodings[0]
-      const maxBitrate = track.kind === 'video' ? VIDEO_MAX_BITRATE : AUDIO_MAX_BITRATE
-      const width = track.kind === 'video' ? track.getSettings().width || 0 : 0
-      const scale = width > MAX_STREAM_WIDTH ? width / MAX_STREAM_WIDTH : 1
-      if (encoding.maxBitrate === maxBitrate && (track.kind !== 'video' || encoding.scaleResolutionDownBy === scale)) continue
-      encoding.maxBitrate = maxBitrate
-      if (track.kind === 'video') encoding.scaleResolutionDownBy = scale
-      await sender.setParameters(params).catch(() => {})
+  const current = session
+  if (current.tuning || !isHost() || current.closed) return
+  current.tuning = true
+  try {
+    for (const [peerId, pc] of Object.entries(current.room?.getPeers() || {})) {
+      if (!current.peers.has(peerId)) continue
+      const quality = person(peerId).quality
+      for (const sender of pc.getSenders()) {
+        if (session !== current || current.closed) return
+        const track = sender.track
+        const params = sender.getParameters()
+        if (!track || !params.encodings?.length || !current.stream?.getTracks().includes(track)) continue
+        const encoding = params.encodings[0]
+        const maxBitrate = track.kind === 'video' ? quality?.bitrate || 4_000_000 : AUDIO_MAX_BITRATE
+        const settings = track.getSettings()
+        const scale = quality?.scale || Math.max(1, (settings.width || 0) / MAX_STREAM_WIDTH, (settings.height || 0) / 1080)
+        if (encoding.maxBitrate === maxBitrate && (track.kind !== 'video' || encoding.scaleResolutionDownBy === scale)) continue
+        encoding.maxBitrate = maxBitrate
+        if (track.kind === 'video') {
+          encoding.scaleResolutionDownBy = scale
+          params.degradationPreference = 'maintain-framerate'
+        }
+        await sender.setParameters(params).catch(() => {})
+      }
     }
-  }
+  } finally { current.tuning = false }
 }
 
 function hostState() {
   const media = player.media
   const video = ui.localVideo
   return {
+    protocol: PROTOCOL,
     hostId: selfId,
     claimedAt: session.claimedAt,
-    title: hostedTitle(),
-    loading: !media && !session.image,
+    sequence: session.sequence,
+    sentAt: performance.now(),
+    ended: Boolean(session.mediaError),
+    error: session.mediaError,
+    title: cleanText(hostedTitle(), 200),
+    loading: !media && !session.image && !session.mediaError,
     image: session.image ? {id: session.image.id} : null,
     playlistId: session.playing?.id || null,
     audioOnly: Boolean(media && !media.video),
@@ -587,13 +706,14 @@ function hostState() {
     duration: player.duration,
     loop: session.loop,
     transcoding: player.transcoding,
-    audio: (media?.audio || []).map((a) => ({value: String(a.index), label: a.label})),
-    audioSelected: player.audioIndex == null ? '' : String(player.audioIndex),
-    subtitles: (media?.subtitles || []).map((s) => ({value: s.id, label: s.label, image: s.image, isDefault: s.isDefault})),
-    subtitleSelected: player.subtitleId || '',
+    audio: (media?.audio || []).slice(0, 128).map((a) => ({value: String(a.index), label: cleanText(a.label, 200) || 'Track'})),
+    audioSelected: media?.audio.some((a) => a.index === player.audioIndex) ? String(player.audioIndex) : '',
+    subtitles: session.catalog.publish(media?.subtitles || []),
+    subtitleSelected: media?.subtitles.some((s) => s.id === player.subtitleId) ? session.catalog.remote.get(player.subtitleId) || '' : '',
     sender: session.link?.sender || null,
     // What each viewer reports receiving, so everyone's room list can show it.
     viewers: Object.fromEntries([...session.people].filter(([, p]) => p.receiver).map(([id, p]) => [id, p.receiver])),
+    senders: Object.fromEntries([...session.people].filter(([, p]) => p.sender).map(([id, p]) => [id, p.sender])),
     epoch: session.epoch,
   }
 }
@@ -611,15 +731,28 @@ function applyViewerBuffer(pc) {
 // Every couple of seconds: measure the connection to everyone in the room. Viewers also adapt
 // their buffer and report what they're receiving so the host can see it.
 async function sampleConnection() {
-  const room = session.room
-  if (!room) return
+  const current = session
+  const room = current.room
+  if (!room || current.sampling || current.closed) return
+  current.sampling = true
+  try {
   const pcs = room.getPeers()
+  const audioOnly = isHost() ? Boolean(player.media && !player.media.video) : Boolean(current.remote?.audioOnly)
   const readings = new Map(
-    await Promise.all(Object.entries(pcs).map(async ([id, pc]) => [id, await pc.getStats().then(readStats, () => null)])),
+    await Promise.all(Object.entries(pcs).map(async ([id, pc]) => [id, await pc.getStats().then((report) => readStats(report, {audioOnly}), () => null)])),
   )
   if (session.room !== room) return
   for (const [id, stats] of readings) {
-    if (stats && session.peers.has(id)) Object.assign(person(id), {rttMs: stats.rttMs, relayed: stats.relayed})
+    if (stats && session.peers.has(id)) {
+      const p = person(id)
+      Object.assign(p, {rttMs: stats.rttMs, relayed: stats.relayed})
+      if (isHost()) {
+        p.sender = stats.outbound
+        if (performance.now() - (p.receiverAt || 0) > HOST_TIMEOUT_MS) p.receiver = null
+        const dimensions = current.stream?.getVideoTracks()[0]?.getSettings() || {}
+        p.quality = chooseSendQuality(p.quality, {receiver: p.receiver, capacity: stats.capacity, peerCount: current.peers.size, ...dimensions})
+      }
+    }
   }
 
   const peerId = session.role === 'viewer' ? session.hostId : [...session.peers][0]
@@ -632,7 +765,8 @@ async function sampleConnection() {
   const base = {rttMs: stats.rttMs, relayed: stats.relayed}
 
   if (isHost()) {
-    session.link = {...session.link, ...base, sender: stats.outbound}
+    session.link = aggregateLinks([...session.people.values()])
+    tuneSenders()
   } else if (session.role === 'viewer' && stats.inbound) {
     // Packet loss is always the network; freezes and jitter only count during steady playback.
     const steady = isSteady(session.steady, performance.now())
@@ -644,33 +778,66 @@ async function sampleConnection() {
     applyViewerBuffer(pc)
     const receiver = {
       lossPct: delta?.lossPct ?? 0,
-      freezes: delta?.freezes ?? 0,
-      droppedFrames: delta?.droppedFrames ?? 0,
+      freezes: Math.max(0, delta?.freezes || 0, steady && !session.remote?.audioOnly && session.lastFrameAt && performance.now() - session.lastFrameAt > 4000 ? 1 : 0),
+      droppedFrames: Math.max(0, delta?.droppedFrames || 0),
       fps: stats.inbound.fps,
       height: stats.inbound.height,
       bufferMs: session.buffer.bufferMs,
+      delayMs: Math.max(0, Math.min(10000, session.frameDelayMs ?? (session.playoutDelayMs || session.buffer.bufferMs) + (stats.rttMs || 0) / 2 + DECODE_DELAY_MS)),
     }
-    session.link = {...base, receiver, sender: session.remote?.sender || null}
-    session.telemetryAction.send(receiver, {target: session.hostId}).catch(() => {})
+    session.link = {...base, receiver, sender: session.remote?.senders?.[selfId] || null}
+    session.telemetryAction.send({receiver, hostId: session.hostId, claimedAt: session.remote.claimedAt}, {target: session.hostId, signal: session.lifetime.signal}).catch(() => {})
   } else {
     session.link = base
   }
-  render()
+  if (session.role === 'viewer' && session.hostId) {
+    const hostId = session.hostId
+    const claimedAt = session.remote?.claimedAt
+    const sent = performance.now()
+    try {
+      const reply = await session.clockAction.request({}, {target: hostId, timeoutMs: 1500, signal: current.lifetime.signal})
+      if (session === current && session.hostId === hostId && session.remote?.claimedAt === claimedAt) session.clock = updateClock(session.clock, sent, performance.now(), reply?.now)
+    } catch {}
+  }
+  if (session === current) render()
+  } finally { current.sampling = false }
 }
 
 function broadcastState(target) {
-  if (session.role !== 'host' || !session.stateAction) return
-  session.stateAction.send(hostState(), target ? {target} : undefined).catch(() => {})
+  if (session.closed || session.role !== 'host' || !session.stateAction) return
+  const current = session
+  // Coalesce periodic/event updates behind an outstanding send; don't build a stale queue.
+  if (current.sendPending && !target) { current.sendDirty = true; return }
+  current.sequence = nextRevision(current.sequence)
+  current.authority = {hostId: selfId, claimedAt: current.claimedAt, sequence: current.sequence}
+  if (!target) current.sendPending = true
+  current.stateAction.send(hostState(), {signal: current.lifetime.signal, ...(target && {target})}).catch(() => {}).finally(() => {
+    if (session !== current || current.closed || target) return
+    current.sendPending = false
+    if (current.sendDirty) { current.sendDirty = false; broadcastState() }
+  })
   render()
 }
 
+function failHosting(error) {
+  if (!isHost() || session.closed) return
+  // Keep this claim alive with a terminal state so late/rejoining viewers learn it too.
+  session.mediaError = 'The host could not play this media. Open another file to continue.'
+  player.close()
+  unpublishStream()
+  clearHostImage()
+  toast(errorMessage(error), true)
+  broadcastState()
+}
+
 function applyCommand(cmd, value) {
-  if (!player.loaded) return
+  if (cmd === 'subtitle' && value) { value = session.catalog.resolve(value); if (!value) return }
+  if (!player.loaded || !validCommand(cmd, value, player.media)) return
   const video = ui.localVideo
   if (cmd === 'loop') session.loop = Boolean(value)
   else if (cmd === 'play') video.play().catch(() => {})
   else if (cmd === 'pause') video.pause()
-  else if (cmd === 'seek') player.seek(Number(value))
+  else if (cmd === 'seek') { session.epoch++; player.seek(value) }
   else if (cmd === 'audio') player.setAudio(value === '' ? null : Number(value))
   else if (cmd === 'subtitle' && (!value || player.media.subtitles.some((s) => s.id === value && s.image))) player.setSubtitle(value || null)
   broadcastState()
@@ -678,33 +845,56 @@ function applyCommand(cmd, value) {
 
 // ---------- Watching ----------
 
-function receiveState(state, peerId) {
-  if (session.role === 'host') {
-    if (!isNewerClaim(state, {hostId: selfId, claimedAt: session.claimedAt})) {
-      broadcastState(peerId) // they'll see our newer claim and step down
-      return
-    }
+function receiveState(value, peerId) {
+  if (session.closed || !session.peers.has(peerId)) return
+  const state = cleanState(value, peerId)
+  if (!state || !acceptsState(state, session.authority)) return
+  const changed = !sameClaim(state, session.authority)
+  if (isHost()) {
     stopHosting()
-    toast('Your friend is hosting now')
+    toast('Another participant is hosting now')
+  }
+  if (changed) {
+    detachRemoteStream()
+    session.clock = null
+    session.lastInbound = null
+    session.playoutDelayMs = null
+    session.buffer = {bufferMs: MIN_BUFFER_MS, calmMs: 0}
+    session.catalog = new SubtitleCatalog()
   }
   const now = performance.now()
   session.steady = nextSteady(session.steady, state, session.remote ? viewerTime() : state.time, now)
+  session.authority = {hostId: state.hostId, claimedAt: state.claimedAt, sequence: state.sequence}
+  session.claimedAt = Math.max(session.claimedAt, state.claimedAt)
   session.hostId = state.hostId
-  session.loop = Boolean(state.loop)
+  session.loop = state.loop
   session.remote = {...state, receivedAt: now}
-  for (const [id, receiver] of Object.entries(state.viewers || {})) {
-    if (session.peers.has(id)) person(id).receiver = receiver
-  }
-  if (session.role !== 'viewer') setRole('viewer')
-  attachRemoteStream()
+  for (const [id, receiver] of Object.entries(state.viewers)) if (session.peers.has(id)) person(id).receiver = receiver
+  session.role = 'viewer'
+  ui.stage.dataset.role = 'viewer'
+  if (state.ended || state.image) detachRemoteStream()
+  else attachRemoteStream()
   render()
 }
 
 function attachRemoteStream() {
   if (session.role !== 'viewer') return
-  const stream = session.peerStreams.get(session.hostId)
+  const entry = session.peerStreams.get(session.hostId)
+  const stream = entry?.claimedAt === session.remote?.claimedAt ? entry.stream : null
   if (stream && ui.remoteVideo.srcObject !== stream) {
     ui.remoteVideo.srcObject = stream
+    session.lastFrameAt = performance.now()
+    const current = session
+    const onFrame = (now, metadata) => {
+      if (session !== current || current.closed || ui.remoteVideo.srcObject !== stream) return
+      current.lastFrameAt = now
+      if (Number.isFinite(metadata.captureTime)) {
+        const delay = metadata.expectedDisplayTime - metadata.captureTime
+        if (delay >= 0 && delay < 10000) current.frameDelayMs = delay
+      }
+      ui.remoteVideo.requestVideoFrameCallback?.(onFrame)
+    }
+    ui.remoteVideo.requestVideoFrameCallback?.(onFrame)
     routeRemoteAudio(stream)
     stream.onaddtrack = () => {
       if (ui.remoteVideo.srcObject === stream) routeRemoteAudio(stream)
@@ -713,11 +903,17 @@ function attachRemoteStream() {
   }
 }
 
+function detachRemoteStream() {
+  if (ui.remoteVideo.srcObject) ui.remoteVideo.srcObject.onaddtrack = null
+  ui.remoteVideo.srcObject = null
+  remoteAudio?.disconnect()
+  remoteAudio = null
+  session.frameDelayMs = null
+  session.lastFrameAt = 0
+}
+
 function viewerTime() {
-  const r = session.remote
-  if (!r) return 0
-  const elapsed = r.playing && !r.buffering ? (performance.now() - r.receivedAt) / 1000 : 0
-  return Math.min(r.time + elapsed, r.duration || Infinity)
+  return estimatedMediaTime(session.remote, performance.now(), session.clock)
 }
 
 // ---------- Profile ----------
@@ -859,8 +1055,20 @@ const localStore = {
   },
 }
 
-const friendNetwork = new FriendNetwork({joinRoom, selfId, appId: APP_ID, storage: localStore})
-const networkReady = window.api.iceServers().catch(() => [])
+const network = createNetwork({getIceServers: () => window.api.iceServers(), PeerConnection: RTCPeerConnection})
+const friendNetwork = new FriendNetwork({joinRoom: (config, ...rest) => joinRoom({...config, ...network.config()}, ...rest), selfId, appId: APP_ID, storage: localStore})
+const networkReady = network.ready.then(() => network.config().turnConfig)
+network.addEventListener('change', () => {
+  if (network.error) showFriendNotice(network.error)
+  else if (ui.friendError.textContent.startsWith('Connection relay')) showFriendNotice(null)
+})
+window.addEventListener('online', () => network.reconnect())
+let lastNetworkTick = Date.now()
+setInterval(() => {
+  const now = Date.now()
+  if (now - lastNetworkTick > 15_000) network.reconnect()
+  lastNetworkTick = now
+}, 5000)
 
 // Local screens never wait for TURN credentials or peer discovery. Let the screen
 // paint before Trystero creates its initial pool of WebRTC connections, too.
@@ -944,6 +1152,11 @@ function renderFriends() {
         row.append(ask)
       }
       row.append(remove)
+      if (!friend.confirmed && ['expired', 'declined'].includes(friend.delivery)) {
+        const retry = element('button', 'small', 'Retry')
+        retry.addEventListener('click', () => friendNetwork.retry(friend.username))
+        row.append(retry)
+      }
       return row
     }),
   )
@@ -1121,14 +1334,14 @@ function syncBoardLayout(force = false) {
   if (ui.board.width !== width || ui.board.height !== height) Object.assign(ui.board, {width, height})
   const ctx = boardContext()
   ctx.clearRect(0, 0, ui.stage.clientWidth, ui.stage.clientHeight)
-  for (const stroke of session.board.strokes.values()) drawStroke(ctx, stroke, rect)
+  for (const stroke of orderedStrokes(session.board)) drawStroke(ctx, stroke, rect)
 }
 
 function receiveBoard(message, peerId) {
   if (message?.type === 'stroke') {
     const stroke = addStrokeChunk(session.board, message)
     if (!stroke) return
-    drawStroke(boardContext(), stroke, currentPictureRect(), message.offset)
+    syncBoardLayout(true)
     if (!boardOpen()) ui.boardToggle.classList.add('activity')
   } else if (message?.type === 'clear') {
     clearBoard(session.board, message.at)
@@ -1155,7 +1368,7 @@ function sendStroke() {
   const {stroke, sent} = drawing
   if (stroke.points.length <= sent) return
   const {id, color, size, at} = stroke
-  session.boardAction.send({type: 'stroke', id, color, size, at, offset: sent, points: stroke.points.slice(sent)}).catch(() => {})
+  session.boardAction.send({type: 'stroke', id, color, size, at, offset: sent, points: stroke.points.slice(sent, sent + MAX_COORDINATES)}).catch(() => {})
   drawing.sent = stroke.points.length
 }
 
@@ -1166,7 +1379,7 @@ function endStroke() {
 
 function clearBoardForEveryone() {
   // Cover strokes stamped by a clock slightly ahead of ours, too.
-  const at = Math.max(Date.now(), ...[...session.board.strokes.values()].map((s) => s.at))
+  const at = nextRevision(session.board.revision, session.board.clearedAt)
   clearBoard(session.board, at)
   session.boardAction?.send({type: 'clear', at}).catch(() => {})
   syncBoardLayout(true)
@@ -1191,7 +1404,7 @@ function renderTools() {
 // asks the owner to host it, and when it ends the host starts the next one it can.
 
 const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>'
-const ownFiles = new Map() // playlist item id -> file path, for items this app added
+// File capabilities belong to this room only (session.ownFiles).
 let itemCount = 0
 
 function addToPlaylist(filePaths) {
@@ -1200,8 +1413,8 @@ function addToPlaylist(filePaths) {
   for (const filePath of filePaths.filter((p) => p && !SUBTITLE_FILE.test(p))) {
     const id = `${selfId}:${Date.now().toString(36)}:${itemCount++}`
     const message = {id, title: filePath.split(/[\\/]/).pop(), position: endPosition(session.playlist), ownerName: myName}
-    if (!addItem(session.playlist, message, selfId)) continue
-    ownFiles.set(message.id, filePath)
+    if (!addItem(session.playlist, message, selfId)) { toast('Playlist limit reached. Remove items, or open a new room if its history is full.', true); break }
+    session.ownFiles.set(message.id, filePath)
     session.playlistAction.send({type: 'add', ...message}).catch(() => {})
     added++
   }
@@ -1211,7 +1424,7 @@ function addToPlaylist(filePaths) {
 
 function removeFromPlaylist(id) {
   removeItem(session.playlist, id)
-  ownFiles.delete(id)
+  session.ownFiles.delete(id)
   session.playlistAction?.send({type: 'remove', id}).catch(() => {})
   render()
 }
@@ -1222,7 +1435,7 @@ function moveInPlaylist(id, index) {
   const position = item && positionAt(session.playlist, id, index)
   if (position == null) return
   // Stamped after the item's last move, so it wins even if that came from a clock running ahead.
-  const move = {id, position, movedAt: Math.max(Date.now(), item.movedAt + 1), movedBy: selfId}
+  const move = {id, position, movedAt: nextRevision(session.playlist.revision), movedBy: selfId}
   if (moveItem(session.playlist, move)) session.playlistAction?.send({type: 'move', ...move}).catch(() => {})
   render()
 }
@@ -1231,14 +1444,14 @@ function receivePlaylist(message, peerId) {
   if (message?.type === 'add') addItem(session.playlist, message, peerId)
   else if (message?.type === 'remove') {
     removeItem(session.playlist, message.id)
-    ownFiles.delete(message.id)
+    session.ownFiles.delete(message.id)
   } else if (message?.type === 'move') moveItem(session.playlist, {...message, movedBy: peerId})
-  else if (message?.type === 'sync') mergePlaylist(session.playlist, message)
+  else if (message?.type === 'sync') mergePlaylist(session.playlist, message, {selfId, ownFiles: session.ownFiles})
   else if (message?.type === 'play') playItem(message.id, peerId)
   render()
 }
 
-const playable = (item) => (item.owner === selfId ? ownFiles.has(item.id) : session.peers.has(item.owner))
+const playable = (item) => (item.owner === selfId ? session.ownFiles.has(item.id) : session.peers.has(item.owner))
 const ownerName = (item) => (item.owner === selfId ? 'you' : session.people.get(item.owner)?.name || item.ownerName || 'Someone')
 
 // Plays an item for everyone. `from` is the peer who asked, when the request came from someone else.
@@ -1246,7 +1459,7 @@ function playItem(id, from = null) {
   const item = session.playlist.items.get(id)
   if (!item) return
   if (item.owner === selfId) {
-    const filePath = ownFiles.get(id)
+    const filePath = session.ownFiles.get(id)
     if (filePath) hostFile(filePath, item)
   } else if (from == null) {
     // Only the owner's app has the file, so it hosts; nobody relays requests for someone else's.
@@ -1445,32 +1658,35 @@ function animateConfetti(now) {
 // Image subtitles (PGS, VobSub) can only be burned into the stream, so they show for everyone.
 
 function hostCues(id) {
-  if (!isHost() || !player.media?.subtitles.some((s) => s.id === id && !s.image)) throw new Error('Subtitle track not found')
-  return window.api.subtitleCues({filePath: player.media.filePath, subtitleId: id})
+  const subtitleId = session.catalog.resolve(id)
+  if (!isHost() || !player.media?.subtitles.some((s) => s.id === subtitleId && !s.image)) throw new Error('Subtitle track not found')
+  return window.api.subtitleCues({filePath: player.media.filePath, subtitleId})
 }
 
-function loadCues(id) {
-  if (id.startsWith(LOCAL_SUBTITLE)) return window.api.subtitleCues({subtitleId: `external:${id.slice(LOCAL_SUBTITLE.length)}`})
+function loadCues(id, signal) {
+  const localPath = session.catalog.local.get(id)
+  if (localPath) return window.api.subtitleCues({subtitleId: `external:${localPath}`})
+  if (typeof id !== 'string' || !/^track:\d{1,3}$/.test(id)) throw new Error('Subtitle track not found')
   if (isHost()) return hostCues(id)
-  return session.cuesAction.request({id}, {target: session.hostId, timeoutMs: CUES_TIMEOUT_MS})
+  return session.cuesAction.request({id, hostId: session.hostId, claimedAt: session.remote.claimedAt}, {target: session.hostId, timeoutMs: CUES_TIMEOUT_MS, signal})
 }
 
 async function selectSubtitle(id) {
-  const token = Symbol('captions')
-  session.captions = {...session.captions, id: id || null, cues: [], token}
+  const current = session
+  current.captions.controller?.abort()
+  const controller = new AbortController()
+  const captions = current.captions = {...current.captions, id: id || null, cues: [], controller}
   if (!id) return
-  const captions = session.captions
-  const slow = setTimeout(() => toast('Loading subtitles…'), 400)
+  const active = () => session === current && !current.closed && current.captions === captions && !controller.signal.aborted
+  const slow = setTimeout(() => { if (active()) toast('Loading subtitles…') }, 400)
   try {
-    const cues = await loadCues(id)
-    if (captions.token === token) captions.cues = cues
+    const cues = await loadCues(id, controller.signal)
+    if (active()) captions.cues = cleanCues(cues)
   } catch (err) {
-    if (captions.token !== token) return
-    Object.assign(captions, {id: null, token: null})
+    if (!active()) return
+    captions.id = null
     toast(`Couldn't load subtitles: ${errorMessage(err)}`, true)
-  } finally {
-    clearTimeout(slow)
-  }
+  } finally { clearTimeout(slow) }
 }
 
 // A new video starts everyone on its default text track, if it has one.
@@ -1484,11 +1700,13 @@ function syncCaptionsToMedia(state) {
 
 function addSubtitleFile(filePath) {
   if (session.role === 'idle') return toast('Open media first')
-  if (isHost()) return selectSubtitle(player.addExternalSubtitle(filePath))
-  const value = `${LOCAL_SUBTITLE}${filePath}`
-  if (!session.localSubtitles.some((s) => s.value === value)) {
-    session.localSubtitles.push({value, label: filePath.split(/[\\/]/).pop()})
+  if (isHost()) {
+    const id = player.addExternalSubtitle(filePath)
+    session.catalog.publish(player.media.subtitles)
+    return selectSubtitle(session.catalog.remote.get(id))
   }
+  const value = session.catalog.addLocal(filePath)
+  if (!session.localSubtitles.some((s) => s.value === value)) session.localSubtitles.push({value, label: filePath.split(/[\\/]/).pop()})
   selectSubtitle(value)
 }
 
@@ -1497,7 +1715,7 @@ let captionsShown = ''
 function drawCaptions() {
   requestAnimationFrame(drawCaptions)
   const {cues} = session.captions
-  const delayMs = isHost() ? 0 : (session.playoutDelayMs ?? session.buffer.bufferMs) + DECODE_DELAY_MS
+  const delayMs = isHost() ? 0 : session.frameDelayMs ?? ((session.playoutDelayMs ?? session.buffer.bufferMs) + (session.link?.rttMs || 0) / 2 + DECODE_DELAY_MS)
   const html = cues.length && session.role !== 'idle' ? captionHtml(cues, currentTime() - delayMs / 1000) : ''
   if (html !== captionsShown) ui.captions.innerHTML = captionsShown = html
 }
@@ -1516,11 +1734,12 @@ function control(cmd, value) {
   if (isHost() ? session.image : session.remote?.image) return // a picture has nothing to play
   if (isHost()) return applyCommand(cmd, value)
   const r = session.remote
-  if (session.role !== 'viewer' || !r) return
-  session.commandAction.send({cmd, value}, {target: session.hostId}).catch(() => {})
+  if (session.role !== 'viewer' || !r || r.ended || performance.now() - r.receivedAt > HOST_TIMEOUT_MS) return
+  session.commandAction.send({cmd, value, hostId: session.hostId, claimedAt: r.claimedAt}, {target: session.hostId, signal: session.lifetime.signal}).catch(() => toast('Playback command was not delivered. Try again.', true))
   session.steady = {...session.steady, since: null}
   // Reflect the change immediately; the host's next state message confirms it.
   const now = performance.now()
+  r.sentAt = now + (session.clock?.offset || 0)
   if (cmd === 'play' || cmd === 'pause') Object.assign(r, {time: viewerTime(), playing: cmd === 'play', receivedAt: now})
   else if (cmd === 'seek') Object.assign(r, {time: Number(value), receivedAt: now})
   else if (cmd === 'loop') session.loop = Boolean(value)
@@ -1557,7 +1776,9 @@ function render() {
   const role = session.role
   const host = role === 'host'
   const r = session.remote
-  const ready = host ? player.loaded || Boolean(session.image) : Boolean(r && !r.loading)
+  const stale = role === 'viewer' && r && performance.now() - r.receivedAt > HOST_TIMEOUT_MS
+  const mediaError = host ? session.mediaError : r?.error
+  const ready = host ? player.loaded || Boolean(session.image) : Boolean(r && !r.loading && !r.ended && !stale)
   const duration = currentDuration()
   const time = currentTime()
 
@@ -1580,9 +1801,9 @@ function render() {
     ui.link.dataset.level = health.level
   }
   // Problems show as a faint caution sign on the video; hover it for the explanation.
-  const problem = connection.problem || (health && health.level !== 'good')
+  const problem = connection.problem || stale || Boolean(network.error) || (health && health.level !== 'good')
   ui.linkWarning.hidden = !problem
-  if (problem) ui.linkWarningTip.textContent = connection.problem ? connection.detail : health.detail
+  if (problem) ui.linkWarningTip.textContent = stale ? 'The host stopped responding. Waiting for playback to recover.' : network.error || (connection.problem ? connection.detail : health?.detail)
   ui.title.textContent = (host ? hostedTitle() : r?.title) || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
   ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: session.connection.joining && !peerCount ? 'Joining room' : ''}[role]
@@ -1590,12 +1811,16 @@ function render() {
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
   const receivingImage = role === 'viewer' && imageMode && !image
+  if (receivingImage && performance.now() - session.imageRetryAt > 15_000) {
+    session.imageRetryAt = performance.now()
+    session.imageRequest.send({id: r.image.id}, {target: session.hostId, signal: session.lifetime.signal}).catch(() => {})
+  }
   ui.stage.classList.toggle('showing-image', imageMode)
   showPicture(image?.url || null)
 
-  ui.stage.classList.toggle('waiting', role === 'viewer' && (!ready || receivingImage))
+  ui.stage.classList.toggle('waiting', Boolean(mediaError) || (role === 'viewer' && (!ready || receivingImage)))
   const progress = receivingImage && session.imageProgress?.id === r.image.id ? session.imageProgress.percent : 0
-  ui.emptyText.textContent = receivingImage
+  ui.emptyText.textContent = mediaError ? mediaError : stale ? 'The host stopped responding. Waiting for playback to recover…' : receivingImage
     ? `Receiving the picture… ${Math.round(progress * 100)}%`
     : role === 'viewer'
       ? 'Your friend is opening something…'
@@ -1604,7 +1829,7 @@ function render() {
   ui.audioOnly.hidden = !audioOnly
   if (audioOnly) ui.audioOnlyTitle.textContent = ui.title.textContent
   const stalled = host ? player.loaded && hostPlaying() && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
-  ui.spinner.hidden = !stalled
+  ui.spinner.hidden = !stalled || Boolean(mediaError) || Boolean(stale)
 
   ui.controls.classList.toggle('disabled', !ready)
   // A picture has nothing to play, seek or loop (control ignores them), so say so.
@@ -1703,7 +1928,7 @@ ui.board.addEventListener('pointerdown', (event) => {
   ui.board.setPointerCapture(event.pointerId)
   const id = `${selfId}:${Date.now().toString(36)}:${strokeCount++}`
   const color = tools.tool === 'eraser' ? ERASER : tools.color
-  const stroke = addStrokeChunk(session.board, {id, color, size: tools.size, at: Date.now(), points: boardPoints(event).slice(0, 2)})
+  const stroke = addStrokeChunk(session.board, {id, color, size: tools.size, at: nextRevision(session.board.revision), points: boardPoints(event).slice(0, 2)})
   drawing = stroke && {stroke, sent: 0}
   if (stroke) drawStroke(boardContext(), stroke, currentPictureRect())
 })
@@ -1712,7 +1937,7 @@ ui.board.addEventListener('pointermove', (event) => {
   const {stroke} = drawing
   const from = stroke.points.length
   if (!addStrokeChunk(session.board, {...stroke, offset: from, points: boardPoints(event)})) return (drawing = null)
-  drawStroke(boardContext(), stroke, currentPictureRect(), from)
+  syncBoardLayout(true)
 })
 ui.board.addEventListener('pointerup', endStroke)
 ui.board.addEventListener('pointercancel', endStroke)
@@ -1938,6 +2163,7 @@ friendNetwork.addEventListener('change', renderFriends)
 friendNetwork.addEventListener('join-ask', ({detail}) => receiveJoinAsk(detail))
 friendNetwork.addEventListener('join-invite', ({detail}) => receiveJoinInvite(detail))
 friendNetwork.addEventListener('join-offer', ({detail}) => receiveJoinOffer(detail))
+friendNetwork.addEventListener('notice', ({detail}) => { showFriendNotice(detail.message); toast(detail.message, true) })
 friendNetwork.addEventListener('join-declined', ({detail}) => showFriendNotice(`${detail.name} can't let you in right now.`, {error: false}))
 renderFriends()
 
@@ -2093,8 +2319,9 @@ function routeRemoteAudio(stream) {
   remoteAudio?.disconnect()
   remoteAudio = null
   if (!stream.getAudioTracks().length) return
+  const out = audioOutput()
   remoteAudio = audio.createMediaStreamSource(stream)
-  remoteAudio.connect(audioOutput())
+  remoteAudio.connect(out)
 }
 
 function setVolume(volume) {
@@ -2191,7 +2418,7 @@ player.addEventListener('session', () => {
   broadcastState()
 })
 player.addEventListener('loading', () => render())
-player.addEventListener('error', ({detail}) => toast(detail, true))
+player.addEventListener('error', ({detail}) => { if (isHost()) failHosting(detail); else toast(detail, true) })
 
 document.addEventListener('keydown', (event) => {
   if (ui.room.hidden || !ui.settings.hidden || event.target.matches('input:not([type=range]), select, textarea')) return
@@ -2291,6 +2518,7 @@ ui.stage.addEventListener('drop', (event) => {
 window.addEventListener('beforeunload', () => {
   session.room?.leave()
   friendNetwork.stop()
+  network.stop()
 })
 
 setInterval(render, 250)

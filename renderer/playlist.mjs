@@ -5,12 +5,14 @@
 // Items are ordered by `position` (ties by id). Anyone can move an item by giving it a new position;
 // the latest move wins everywhere (`movedAt`, then `movedBy`), so reorders from two people converge.
 import {cleanDisplayName, cleanText} from './profile.mjs'
+import {isRevision} from './protocol.mjs'
 
 export const MAX_ITEMS = 500
+export const MAX_REMOVED = 4096
 export const MAX_TITLE_LENGTH = 200
 const MAX_ID_LENGTH = 100
 
-export const createPlaylist = () => ({items: new Map(), removed: new Set(), pendingMoves: new Map()})
+export const createPlaylist = () => ({items: new Map(), removed: new Set(), pendingMoves: new Map(), revision: 0})
 
 const isId = (id) => typeof id === 'string' && id.length > 0 && id.length <= MAX_ID_LENGTH
 const isNewerMove = (a, b) => (a.movedAt !== b.movedAt ? a.movedAt > b.movedAt : a.movedBy > b.movedBy)
@@ -20,10 +22,11 @@ const isNewerMove = (a, b) => (a.movedAt !== b.movedAt ? a.movedAt > b.movedAt :
 export function addItem(playlist, {id, title, position, ownerName, movedAt = 0, movedBy = ''}, owner) {
   if (!isId(id) || !isId(owner) || !Number.isFinite(position) || playlist.removed.has(id) || playlist.items.has(id)) return null
   const cleanTitle = cleanText(title, MAX_TITLE_LENGTH)
-  if (!cleanTitle || playlist.items.size >= MAX_ITEMS) return null
-  const moved = Number.isFinite(movedAt) && movedAt > 0 && isId(movedBy)
+  if (!cleanTitle || playlist.items.size >= MAX_ITEMS || playlist.removed.size + playlist.items.size >= MAX_REMOVED) return null
+  const moved = isRevision(movedAt) && movedAt > 0 && isId(movedBy)
   const item = {id, title: cleanTitle, position, owner, ownerName: cleanDisplayName(ownerName), movedAt: moved ? movedAt : 0, movedBy: moved ? movedBy : ''}
   playlist.items.set(id, item)
+  playlist.revision = Math.max(playlist.revision, item.movedAt)
   // A move can arrive before the item it moves, when the person who added it is further away.
   const pending = playlist.pendingMoves.get(id)
   playlist.pendingMoves.delete(id)
@@ -33,7 +36,8 @@ export function addItem(playlist, {id, title, position, ownerName, movedAt = 0, 
 
 // Returns whether the move changed the item.
 export function moveItem(playlist, {id, position, movedAt, movedBy}) {
-  if (!isId(id) || !Number.isFinite(position) || !Number.isFinite(movedAt) || !isId(movedBy)) return false
+  if (!isId(id) || !Number.isFinite(position) || !isRevision(movedAt) || !isId(movedBy)) return false
+  playlist.revision = Math.max(playlist.revision, movedAt)
   const move = {id, position, movedAt, movedBy}
   const item = playlist.items.get(id)
   if (!item) {
@@ -50,6 +54,8 @@ export function moveItem(playlist, {id, position, movedAt, movedBy}) {
 // Removals are remembered, so an item removed here never comes back from someone's older snapshot.
 export function removeItem(playlist, id) {
   if (!isId(id)) return
+  // Reserve enough history for removing every extant item; never evict tombstones.
+  if (!playlist.removed.has(id) && !playlist.items.has(id) && playlist.removed.size + playlist.items.size >= MAX_REMOVED) return
   playlist.removed.add(id)
   playlist.items.delete(id)
   playlist.pendingMoves.delete(id)
@@ -58,9 +64,10 @@ export function removeItem(playlist, id) {
 export const playlistSnapshot = (playlist) => ({items: [...playlist.items.values()], removed: [...playlist.removed]})
 
 // Someone joining gets a snapshot from everyone already in the room; merging is idempotent.
-export function mergePlaylist(playlist, snapshot) {
-  for (const id of Array.isArray(snapshot?.removed) ? snapshot.removed : []) removeItem(playlist, id)
-  for (const item of Array.isArray(snapshot?.items) ? snapshot.items : []) {
+export function mergePlaylist(playlist, snapshot, {selfId, ownFiles} = {}) {
+  for (const id of Array.isArray(snapshot?.removed) ? snapshot.removed.slice(0, MAX_REMOVED) : []) removeItem(playlist, id)
+  for (const item of Array.isArray(snapshot?.items) ? snapshot.items.slice(0, MAX_ITEMS) : []) {
+    if (item?.owner === selfId && (!ownFiles?.has(item.id) || !playlist.items.has(item.id))) continue
     if (playlist.items.has(item?.id)) moveItem(playlist, item)
     else addItem(playlist, item || {}, item?.owner)
   }

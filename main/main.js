@@ -1,4 +1,5 @@
 const path = require('node:path')
+const fs = require('node:fs')
 const {app, BrowserWindow, dialog, ipcMain} = require('electron')
 const media = require('./media')
 const {loadIceServers} = require('./turn')
@@ -57,7 +58,10 @@ function registerIpc() {
   ipcMain.handle('session:pull', (_event, id) => media.pull(id))
   ipcMain.handle('session:stop', (_event, id) => media.stopSession(id))
   ipcMain.handle('subtitle:cues', (_event, options) => media.subtitleCues(options))
-  ipcMain.handle('net:ice-servers', () => loadIceServers(turnConfigPath()))
+  ipcMain.handle('net:ice-servers', () => {
+    const local = path.join(app.getPath('userData'), 'turn.json')
+    return fs.existsSync(local) ? loadIceServers(local) : loadIceServers(turnConfigPath(), {publicOnly: app.isPackaged})
+  })
   ipcMain.handle('window:pin', (event, pinned) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     win.setAlwaysOnTop(Boolean(pinned), 'floating')

@@ -51,6 +51,65 @@ const memoryStorage = () => {
   return {load: (key) => structuredClone(data.get(key) ?? null), save: (key, value) => data.set(key, structuredClone(value))}
 }
 
+test('renaming with queued requests waits for old recipient inbox disposal', async () => {
+  const occupied = new Map()
+  const closing = []
+  const joinRoom = (_config, id) => {
+    if (occupied.has(id)) return occupied.get(id)
+    const room = {makeAction: () => ({send: async () => {}}), leave: () => new Promise((resolve) => closing.push(() => { occupied.delete(id); resolve() }))}
+    occupied.set(id, room)
+    return room
+  }
+  const network = new FriendNetwork({joinRoom, selfId: 'me', appId: 'test', storage: memoryStorage()})
+  network.start(await createIdentity('original'), {})
+  const other = await createIdentity('friend')
+  network.add(other.username)
+  const id = inboxRoomId(other.username), old = network.links.get(id).room
+  network.restart(await createIdentity('renamed'))
+  assert.equal(network.links.has(id), false)
+  await Promise.resolve()
+  closing.splice(0).forEach((finish) => finish())
+  await until(() => network.links.has(id), 'new inbox')
+  assert.notEqual(network.links.get(id).room, old)
+  network.stop()
+  await Promise.resolve()
+  closing.splice(0).forEach((finish) => finish())
+})
+
+test('late answers cannot complete a newer join request; failed sends allow retry', async () => {
+  const net = fakeTrystero(), a = await person(net, 'a', 'A'), b = await person(net, 'b', 'B')
+  a.friends.add(b.identity.username); b.friends.add(a.identity.username)
+  await until(() => a.friends.online.size && b.friends.online.size, 'friends')
+  let joined = 0
+  a.friends.addEventListener('join-invite', () => joined++)
+  a.friends.askToJoin(b.identity.username)
+  const old = a.friends.askIds.get(b.identity.username)
+  a.friends.forgetAsk(b.identity.username)
+  a.friends.askToJoin(b.identity.username)
+  const entry = b.friends.online.get(a.identity.username)
+  await entry.link.actions.join.send({type: 'invite', id: old, code: 'ABCDEFGH'}, {target: entry.peerId})
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  assert.equal(joined, 0)
+  assert.ok(a.friends.list()[0].asked)
+  a.friends.online.get(b.identity.username).link.actions.join.send = async () => { throw new Error('disconnected') }
+  a.friends.askToJoin(b.identity.username)
+  await Promise.resolve()
+  assert.equal(a.friends.list()[0].asked, false)
+  await Promise.all([a.friends.stop(), b.friends.stop()])
+})
+
+test('unanswered delivered friend requests expire and can be retried', async () => {
+  const net = fakeTrystero(), a = await person(net, 'a', 'A'), b = await person(net, 'b', 'B')
+  a.friends.add(b.identity.username)
+  await until(() => a.friends.list()[0].requested, 'delivered')
+  a.friends.expireRequests(Date.now() + 120001)
+  assert.equal(a.friends.list()[0].delivery, 'expired')
+  assert.match(presenceText(a.friends.list()[0]), /retry/)
+  a.friends.retry(b.identity.username)
+  assert.equal(a.friends.list()[0].delivery, null)
+  await Promise.all([a.friends.stop(), b.friends.stop()])
+})
+
 async function person(net, selfId, name) {
   const identity = await createIdentity('tester')
   const storage = memoryStorage()
