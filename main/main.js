@@ -2,10 +2,13 @@ const path = require('node:path')
 const {app, BrowserWindow, dialog, ipcMain} = require('electron')
 const media = require('./media')
 const {loadIceServers} = require('./turn')
+const IMAGES = require('../shared/images.json')
 
-const VIDEO_EXTENSIONS = [
+const MEDIA_EXTENSIONS = [
   'mkv', 'mp4', 'm4v', 'mov', 'avi', 'webm', 'wmv', 'flv', 'ts', 'm2ts', 'mts',
   'mpg', 'mpeg', 'vob', 'ogv', '3gp', 'divx', 'rmvb', 'asf', 'f4v',
+  'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'oga', 'opus', 'wma', 'aiff', 'aif', 'alac', 'ape', 'mka', 'ac3', 'dts',
+  ...Object.keys(IMAGES.native), ...IMAGES.convert,
 ]
 const SUBTITLE_EXTENSIONS = ['srt', 'ass', 'ssa', 'vtt']
 
@@ -32,18 +35,22 @@ function createWindow() {
   return win
 }
 
-async function pickFile(event, name, extensions) {
+async function pickFiles(event, name, extensions, multiple = false) {
   const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
-    properties: ['openFile'],
+    properties: ['openFile', ...(multiple ? ['multiSelections'] : [])],
     filters: [{name, extensions}, {name: 'All files', extensions: ['*']}],
   })
-  return result.canceled ? null : result.filePaths[0]
+  return result.canceled ? [] : result.filePaths
 }
 
+const pickFile = (event, name, extensions) => pickFiles(event, name, extensions).then((paths) => paths[0] || null)
+
 function registerIpc() {
-  ipcMain.handle('dialog:video', (event) => pickFile(event, 'Video', VIDEO_EXTENSIONS))
+  ipcMain.handle('dialog:media', (event) => pickFile(event, 'Media', MEDIA_EXTENSIONS))
+  ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))
   ipcMain.handle('dialog:subtitle', (event) => pickFile(event, 'Subtitles', SUBTITLE_EXTENSIONS))
   ipcMain.handle('media:probe', (_event, filePath) => media.probe(filePath))
+  ipcMain.handle('media:image', (_event, filePath) => media.readImage(filePath))
   ipcMain.handle('session:start', (_event, options) => media.startSession(options))
   ipcMain.handle('session:pull', (_event, id) => media.pull(id))
   ipcMain.handle('session:stop', (_event, id) => media.stopSession(id))

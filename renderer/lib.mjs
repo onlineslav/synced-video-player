@@ -1,4 +1,17 @@
+import IMAGES from '../shared/images.json' with {type: 'json'}
+
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+const IMAGE_MIMES = new Set(Object.values(IMAGES.native))
+
+export const MAX_IMAGE_BYTES = IMAGES.maxBytes
+
+// Pictures are sent to everyone as files instead of being streamed.
+export function isImagePath(filePath) {
+  const ext = (/\.([^.\\/]+)$/.exec(String(filePath))?.[1] || '').toLowerCase()
+  return Object.hasOwn(IMAGES.native, ext) || IMAGES.convert.includes(ext)
+}
+
+export const isImageMime = (mime) => IMAGE_MIMES.has(mime)
 
 export function generateRoomCode(random = (bytes) => crypto.getRandomValues(bytes)) {
   const bytes = random(new Uint8Array(8))

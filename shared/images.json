@@ -1,0 +1,16 @@
+{
+  "maxBytes": 52428800,
+  "native": {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "jfif": "image/jpeg",
+    "png": "image/png",
+    "apng": "image/apng",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "avif": "image/avif",
+    "bmp": "image/bmp",
+    "ico": "image/x-icon"
+  },
+  "convert": ["tif", "tiff", "tga", "psd", "dds", "pcx", "ppm", "pgm", "pbm", "qoi"]
+}

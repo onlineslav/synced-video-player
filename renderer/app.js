@@ -4,7 +4,10 @@ import {
   formatRoomCode,
   formatTime,
   generateRoomCode,
+  isImageMime,
+  isImagePath,
   isNewerClaim,
+  MAX_IMAGE_BYTES,
   normalizeRoomCode,
   preferHighStartBitrate,
   preferStereoOpus,
@@ -17,6 +20,26 @@ import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
+import {
+  DRAWER,
+  addItem,
+  createPlaylist,
+  draggedWidth,
+  maxDrawerWidth,
+  mergePlaylist,
+  nextItem,
+  orderedItems,
+  playlistSnapshot,
+  clampDrag,
+  dropIndex,
+  slotShift,
+  endPosition,
+  moveItem,
+  positionAt,
+  removeItem,
+  settledWidth,
+} from './playlist.mjs'
+import {averageLuminance, proximity, sourceRegion, toneFor} from './overlay.mjs'
 import {
   BRUSH_SIZES,
   COLORS,
@@ -114,6 +137,7 @@ const ui = {
   friendsEmpty: $('friends-empty'),
   joinRequests: $('join-requests'),
   reactions: $('reactions'),
+  reactionsToggle: $('reactions-toggle'),
   reactionFeed: $('reaction-feed'),
   confetti: $('confetti'),
   create: $('create'),
@@ -137,11 +161,20 @@ const ui = {
   sizes: $('sizes'),
   boardClear: $('board-clear'),
   eraser: $('eraser'),
-  openButtons: document.querySelectorAll('[data-open-video]'),
+  playlist: $('playlist'),
+  playlistTab: $('playlist-tab'),
+  playlistEdge: $('playlist-edge'),
+  playlistAdd: $('playlist-add'),
+  playlistItems: $('playlist-items'),
+  playlistEmpty: $('playlist-empty'),
+  openButtons: document.querySelectorAll('[data-open-media]'),
+  audioOnly: $('audio-only'),
+  audioOnlyTitle: $('audio-only-title'),
   leave: $('leave'),
   stage: $('stage'),
   localVideo: $('local-video'),
   remoteVideo: $('remote-video'),
+  picture: $('picture'),
   captions: $('captions'),
   emptyText: $('empty-text'),
   spinner: $('spinner'),
@@ -190,6 +223,13 @@ const blankSession = () => ({
   cuesAction: null,
   captions: {mediaKey: null, id: null, cues: [], token: null}, // this person's own text subtitles
   localSubtitles: [], // subtitle files only this person loaded
+  imageAction: null,
+  image: null, // host: the picture being shown {id, name, mime, bytes, url}
+  images: new Map(), // peerId -> {id, url}: the last picture each host sent
+  imageProgress: null, // viewer: {id, percent} while a picture is arriving
+  playlistAction: null,
+  playlist: createPlaylist(),
+  playing: null, // host: the playlist item being hosted {id, at}, so the next one can follow it
 })
 let session = blankSession()
 
@@ -209,6 +249,14 @@ async function enterRoom(code) {
     profileAction: room.makeAction('profile'),
     boardAction: room.makeAction('board'),
     reactAction: room.makeAction('react'),
+    imageAction: room.makeAction('image'),
+    playlistAction: room.makeAction('playlist'),
+  }
+  session.playlistAction.onMessage = (message, {peerId}) => receivePlaylist(message, peerId)
+  session.imageAction.onMessage = (bytes, {peerId, metadata}) => receiveImage(bytes, peerId, metadata)
+  // Arrives per 16KB chunk, so it's only stored; the regular render picks it up.
+  session.imageAction.onReceiveProgress = (percent, {peerId, metadata}) => {
+    if (peerId === session.hostId && typeof metadata?.id === 'string') session.imageProgress = {id: metadata.id, percent}
   }
   session.reactAction.onMessage = (message, {peerId}) => receiveReaction(message?.kind, peerId)
   session.cuesAction.onRequest = ({id}) => hostCues(id)
@@ -224,9 +272,13 @@ async function enterRoom(code) {
     session.peers.add(peerId)
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
     if (session.board.strokes.size) session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
+    if (session.playlist.items.size || session.playlist.removed.size) {
+      session.playlistAction.send({type: 'sync', ...playlistSnapshot(session.playlist)}, {target: peerId}).catch(() => {})
+    }
     toast('Friend connected')
     if (session.role === 'host') {
       if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId})).then(tuneSenders, () => {})
+      if (session.image) sendImage(peerId)
       broadcastState(peerId)
     }
     render()
@@ -236,6 +288,7 @@ async function enterRoom(code) {
     session.peers.delete(peerId)
     session.peerStreams.delete(peerId)
     session.people.delete(peerId)
+    forgetImage(peerId)
     if (session.role === 'viewer' && peerId === session.hostId) {
       session.hostId = null
       session.remote = null
@@ -276,6 +329,8 @@ async function leaveRoom() {
   ui.remoteVideo.srcObject = null
   ui.joinRequests.replaceChildren()
   ui.reactionFeed.replaceChildren()
+  clearHostImage()
+  for (const peerId of [...session.images.keys()]) forgetImage(peerId)
   session = blankSession()
   setRole('idle')
   ui.room.hidden = true
@@ -291,14 +346,18 @@ function setRole(role) {
 
 // ---------- Hosting ----------
 
-async function hostFile(filePath) {
+// `item` is the playlist item this file was started from, if any.
+async function hostFile(filePath, item = null) {
   if (!session.room) return
-  session.claimedAt = Date.now()
+  const claimedAt = (session.claimedAt = Date.now())
+  session.playing = item && {id: item.id, position: item.position}
   session.hostId = selfId
   session.remote = null
   ui.remoteVideo.srcObject = null
+  clearHostImage()
   setRole('host')
   broadcastState()
+  if (isImagePath(filePath)) return hostImage(filePath, claimedAt)
   try {
     if (await player.open(filePath)) ui.localVideo.play().catch(() => {})
   } catch (err) {
@@ -311,16 +370,81 @@ async function hostFile(filePath) {
 function stopHosting() {
   player.close()
   unpublishStream()
+  clearHostImage()
+  session.playing = null
   setRole('idle')
 }
 
+const hostedTitle = () => session.image?.name || player.media?.title || player.media?.name || null
+
+// ---------- Pictures ----------
+// A picture isn't streamed: the host sends the file itself, so everyone sees it at full resolution.
+
+async function hostImage(filePath, claimedAt) {
+  player.close()
+  unpublishStream()
+  try {
+    const {name, mime, bytes} = await window.api.readImage(filePath)
+    if (session.claimedAt !== claimedAt || !isHost()) return
+    const url = URL.createObjectURL(new Blob([bytes], {type: mime}))
+    session.image = {id: String(claimedAt), name, mime, bytes, url}
+    sendImage()
+  } catch (err) {
+    if (session.claimedAt !== claimedAt || !isHost()) return
+    toast(errorMessage(err), true)
+    stopHosting()
+  }
+  broadcastState()
+}
+
+function sendImage(target) {
+  const {id, name, mime, bytes} = session.image
+  session.imageAction.send(bytes, {metadata: {id, name, mime}, ...(target && {target})}).catch(() => {})
+}
+
+function clearHostImage() {
+  if (session.image) URL.revokeObjectURL(session.image.url)
+  session.image = null
+}
+
+// Kept per sender until they send another, so a picture that arrives before its state still shows.
+function receiveImage(bytes, peerId, metadata) {
+  const {id, mime} = metadata || {}
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_IMAGE_BYTES || typeof id !== 'string' || !isImageMime(mime)) return
+  forgetImage(peerId)
+  session.images.set(peerId, {id, url: URL.createObjectURL(new Blob([bytes], {type: mime}))})
+  render()
+}
+
+function forgetImage(peerId) {
+  const image = session.images.get(peerId)
+  if (image) URL.revokeObjectURL(image.url)
+  session.images.delete(peerId)
+}
+
+// The host's own picture, or the one the host sent if it's the one their state names.
+function shownImage() {
+  if (isHost()) return session.image
+  const wanted = session.remote?.image?.id
+  const received = wanted && session.images.get(session.hostId)
+  return received && received.id === wanted ? received : null
+}
+
+function showPicture(url) {
+  if ((ui.picture.getAttribute('src') || null) === url) return
+  if (url) ui.picture.src = url
+  else ui.picture.removeAttribute('src')
+  ui.picture.hidden = !url
+}
+
 // Video comes from captureVideoFrames (true source frame rate); captureStream supplies audio,
-// and video too if the frame APIs are unavailable.
+// and video too if the frame APIs are unavailable. Audio files get no video track: one that never
+// receives a frame can hold the viewer's <video> below HAVE_CURRENT_DATA, so it never plays.
 function publishStream() {
   unpublishStream()
   const video = ui.localVideo
   const captured = video.captureStream()
-  const frames = captureVideoFrames(video)
+  const frames = player.media?.video ? captureVideoFrames(video) : null
   const usable = (track) => !(frames && track.kind === 'video')
   for (const track of captured.getTracks()) if (!usable(track)) track.stop()
 
@@ -376,10 +500,13 @@ function hostState() {
   return {
     hostId: selfId,
     claimedAt: session.claimedAt,
-    title: media ? media.title || media.name : null,
-    loading: !media,
-    playing: !video.paused,
-    buffering: !video.paused && video.readyState < 3,
+    title: hostedTitle(),
+    loading: !media && !session.image,
+    image: session.image ? {id: session.image.id} : null,
+    playlistId: session.playing?.id || null,
+    audioOnly: Boolean(media && !media.video),
+    playing: hostPlaying(),
+    buffering: hostPlaying() && video.readyState < 3,
     time: video.currentTime,
     duration: player.duration,
     loop: session.loop,
@@ -521,8 +648,8 @@ const myProfile = () => ({name: myName, username: identity?.username || null, st
 
 // Friends see whether you're in a room, and what you're hosting.
 function myStatus() {
-  const hosting = session.role === 'host' && player.loaded
-  return {inRoom: Boolean(session.room), hosting, title: hosting ? player.media.title || player.media.name : null}
+  const hosting = session.role === 'host' && (player.loaded || Boolean(session.image))
+  return {inRoom: Boolean(session.room), hosting, title: hosting ? hostedTitle() : null}
 }
 
 let sharedStatus = ''
@@ -822,6 +949,10 @@ let boardLayout = null // what the canvas was last fully drawn for
 const boardOpen = () => ui.room.classList.contains('board-open')
 
 function currentPictureRect() {
+  const {picture} = ui
+  if (shownImage() && picture.complete && picture.naturalWidth) {
+    return pictureRect(ui.stage.clientWidth, ui.stage.clientHeight, picture.naturalWidth, picture.naturalHeight)
+  }
   const video = isHost() ? ui.localVideo : ui.remoteVideo
   const playing = session.role !== 'idle'
   return pictureRect(ui.stage.clientWidth, ui.stage.clientHeight, playing ? video.videoWidth : 0, playing ? video.videoHeight : 0)
@@ -908,6 +1039,188 @@ function renderTools() {
   ui.eraser.classList.toggle('active', tools.tool === 'eraser')
   for (const swatch of ui.swatches.children) swatch.classList.toggle('active', swatch.dataset.color === tools.color)
   for (const size of ui.sizes.children) size.classList.toggle('active', Number(size.dataset.size) === tools.size)
+}
+
+// ---------- Playlist ----------
+// Anyone adds files from their own computer. A file never leaves its owner's app: playing an item
+// asks the owner to host it, and when it ends the host starts the next one it can.
+
+const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>'
+const ownFiles = new Map() // playlist item id -> file path, for items this app added
+let itemCount = 0
+
+function addToPlaylist(filePaths) {
+  if (!session.room) return
+  let added = 0
+  for (const filePath of filePaths.filter((p) => p && !SUBTITLE_FILE.test(p))) {
+    const id = `${selfId}:${Date.now().toString(36)}:${itemCount++}`
+    const message = {id, title: filePath.split(/[\\/]/).pop(), position: endPosition(session.playlist), ownerName: myName}
+    if (!addItem(session.playlist, message, selfId)) continue
+    ownFiles.set(message.id, filePath)
+    session.playlistAction.send({type: 'add', ...message}).catch(() => {})
+    added++
+  }
+  if (added) toast(added === 1 ? 'Added to the playlist' : `Added ${added} files to the playlist`)
+  render()
+}
+
+function removeFromPlaylist(id) {
+  removeItem(session.playlist, id)
+  ownFiles.delete(id)
+  session.playlistAction?.send({type: 'remove', id}).catch(() => {})
+  render()
+}
+
+// Moves item `id` to `index` among the other items, for everyone.
+function moveInPlaylist(id, index) {
+  const item = session.playlist.items.get(id)
+  const position = item && positionAt(session.playlist, id, index)
+  if (position == null) return
+  // Stamped after the item's last move, so it wins even if that came from a clock running ahead.
+  const move = {id, position, movedAt: Math.max(Date.now(), item.movedAt + 1), movedBy: selfId}
+  if (moveItem(session.playlist, move)) session.playlistAction?.send({type: 'move', ...move}).catch(() => {})
+  render()
+}
+
+function receivePlaylist(message, peerId) {
+  if (message?.type === 'add') addItem(session.playlist, message, peerId)
+  else if (message?.type === 'remove') {
+    removeItem(session.playlist, message.id)
+    ownFiles.delete(message.id)
+  } else if (message?.type === 'move') moveItem(session.playlist, {...message, movedBy: peerId})
+  else if (message?.type === 'sync') mergePlaylist(session.playlist, message)
+  else if (message?.type === 'play') playItem(message.id, peerId)
+  render()
+}
+
+const playable = (item) => (item.owner === selfId ? ownFiles.has(item.id) : session.peers.has(item.owner))
+const ownerName = (item) => (item.owner === selfId ? 'you' : session.people.get(item.owner)?.name || item.ownerName || 'Someone')
+
+// Plays an item for everyone. `from` is the peer who asked, when the request came from someone else.
+function playItem(id, from = null) {
+  const item = session.playlist.items.get(id)
+  if (!item) return
+  if (item.owner === selfId) {
+    const filePath = ownFiles.get(id)
+    if (filePath) hostFile(filePath, item)
+  } else if (from == null) {
+    // Only the owner's app has the file, so it hosts; nobody relays requests for someone else's.
+    if (!session.peers.has(item.owner)) return toast(`${ownerName(item)} left, so that can't play`, true)
+    session.playlistAction.send({type: 'play', id}, {target: item.owner}).catch(() => {})
+  }
+}
+
+function playNext() {
+  const next = nextItem(session.playlist, session.playing, playable)
+  if (next) playItem(next.id)
+}
+
+function renderPlaylist() {
+  const items = orderedItems(session.playlist)
+  const current = isHost() ? session.playing?.id : session.remote?.playlistId
+  ui.playlistEmpty.hidden = items.length > 0
+  const rows = items.map((item) => ({item, current: item.id === current, available: playable(item), owner: ownerName(item)}))
+  const signature = JSON.stringify(rows.map(({item, current, available, owner}) => [item.id, item.title, current, available, owner]))
+  // Don't rebuild the rows under someone dragging one; the list catches up when they let go.
+  if (ui.playlistItems.dataset.signature === signature || itemDrag) return
+  ui.playlistItems.dataset.signature = signature
+  ui.playlistItems.replaceChildren(
+    ...rows.map(({item, current, available, owner}) => {
+      const row = element('li', 'playlist-item')
+      row.dataset.id = item.id
+      row.title = 'Drag to reorder'
+      row.classList.toggle('current', current)
+      row.classList.toggle('missing', !available)
+      const play = element('button', 'playlist-play')
+      play.innerHTML = PLAY_ICON
+      play.disabled = !available
+      play.title = available ? 'Play for everyone' : `${owner} isn't in the room`
+      play.setAttribute('aria-label', `Play ${item.title}`)
+      play.addEventListener('click', () => playItem(item.id))
+      const main = element('div', 'person-main')
+      const status = !available ? `${owner} left, so this can't play` : `${current ? 'Playing · ' : ''}Added by ${owner}`
+      main.append(element('div', 'person-name', item.title), element('div', 'person-stats', status))
+      main.firstChild.title = item.title
+      const remove = element('button', 'playlist-remove', '×')
+      remove.title = 'Remove for everyone'
+      remove.setAttribute('aria-label', `Remove ${item.title}`)
+      remove.addEventListener('click', () => removeFromPlaylist(item.id))
+      row.addEventListener('dblclick', (event) => {
+        if (available && !event.target.closest('button')) playItem(item.id)
+      })
+      row.append(play, main, remove)
+      return row
+    }),
+  )
+}
+
+// The drawer: click the tab to open or close it, or drag the tab or the open panel's left edge to
+// pull it out to any width or push it closed.
+let playlistWidth = DRAWER.defaultWidth // the width it opens at
+let tabDrag = null // {startX, startWidth, width} while the tab or edge is held
+let tabDragged = false // the click that follows a drag shouldn't also toggle
+
+const playlistOpen = () => ui.room.classList.contains('playlist-open')
+const fittedPlaylistWidth = () => Math.min(playlistWidth, maxDrawerWidth(innerWidth))
+
+function showPlaylistWidth(width) {
+  ui.room.style.setProperty('--playlist-width', `${width}px`)
+  ui.room.classList.toggle('playlist-open', width > 0)
+  ui.playlistTab.setAttribute('aria-expanded', String(width > 0))
+}
+
+function setPlaylistOpen(open) {
+  showPlaylistWidth(open ? fittedPlaylistWidth() : 0)
+  try {
+    localStorage.setItem('playlist', JSON.stringify({open, width: playlistWidth}))
+  } catch {}
+}
+
+function endTabDrag() {
+  const drag = tabDrag
+  tabDrag = null
+  ui.room.classList.remove('resizing')
+  tabDragged = drag?.width != null
+  if (!tabDragged) return
+  const width = settledWidth(drag.width, maxDrawerWidth(innerWidth))
+  if (width) playlistWidth = width
+  setPlaylistOpen(width > 0)
+}
+
+// The tab turns black over bright pictures: a few times a second, read the pixels behind it.
+const toneCanvas = Object.assign(document.createElement('canvas'), {width: 4, height: 12})
+const toneContext = toneCanvas.getContext('2d', {willReadFrequently: true})
+let tabTone = 'light'
+
+// What's showing on the stage, with its own pixel size; null for a blank or audio-only stage.
+function visibleSource() {
+  if (shownImage()) {
+    const {picture} = ui
+    return picture.complete && picture.naturalWidth ? {element: picture, width: picture.naturalWidth, height: picture.naturalHeight} : null
+  }
+  if (session.role === 'idle') return null
+  const video = isHost() ? ui.localVideo : ui.remoteVideo
+  return video.videoWidth && video.readyState >= 2 ? {element: video, width: video.videoWidth, height: video.videoHeight} : null
+}
+
+function sampleTabTone() {
+  if (ui.room.hidden || ui.room.classList.contains('idle')) return
+  const stage = ui.stage.getBoundingClientRect()
+  const tab = ui.playlistTab.getBoundingClientRect()
+  const target = {x: tab.left - stage.left, y: tab.top - stage.top, width: tab.width, height: tab.height}
+  const source = visibleSource()
+  const rect = source && pictureRect(stage.width, stage.height, source.width, source.height)
+  const region = source && sourceRegion(target, rect, source.width, source.height)
+  let luminance = 0
+  if (region) {
+    try {
+      toneContext.clearRect(0, 0, toneCanvas.width, toneCanvas.height)
+      toneContext.drawImage(source.element, region.sx, region.sy, region.sw, region.sh, 0, 0, toneCanvas.width, toneCanvas.height)
+      luminance = averageLuminance(toneContext.getImageData(0, 0, toneCanvas.width, toneCanvas.height).data)
+    } catch {}
+  }
+  tabTone = toneFor(luminance, tabTone)
+  if (ui.playlistTab.dataset.tone !== tabTone) ui.playlistTab.dataset.tone = tabTone
 }
 
 // ---------- Reactions ----------
@@ -1027,7 +1340,7 @@ function syncCaptionsToMedia(state) {
 }
 
 function addSubtitleFile(filePath) {
-  if (session.role === 'idle') return toast('Open a video first')
+  if (session.role === 'idle') return toast('Open media first')
   if (isHost()) return selectSubtitle(player.addExternalSubtitle(filePath))
   const value = `${LOCAL_SUBTITLE}${filePath}`
   if (!session.localSubtitles.some((s) => s.value === value)) {
@@ -1051,9 +1364,13 @@ function drawCaptions() {
 const isHost = () => session.role === 'host'
 const currentTime = () => (isHost() ? ui.localVideo.currentTime : viewerTime())
 const currentDuration = () => (isHost() ? player.duration : session.remote?.duration || 0)
-const isPlaying = () => (isHost() ? !ui.localVideo.paused : Boolean(session.remote?.playing))
+// A video that reaches its end is paused just before 'ended' fires. With loop on it restarts
+// straight away, so that moment still counts as playing: the UI stays hidden and viewers never see a pause.
+const hostPlaying = () => !ui.localVideo.paused || (session.loop && ui.localVideo.ended)
+const isPlaying = () => (isHost() ? hostPlaying() : Boolean(session.remote?.playing))
 
 function control(cmd, value) {
+  if (isHost() ? session.image : session.remote?.image) return // a picture has nothing to play
   if (isHost()) return applyCommand(cmd, value)
   const r = session.remote
   if (session.role !== 'viewer' || !r) return
@@ -1090,7 +1407,7 @@ function render() {
   const role = session.role
   const host = role === 'host'
   const r = session.remote
-  const ready = host ? player.loaded : Boolean(r && !r.loading)
+  const ready = host ? player.loaded || Boolean(session.image) : Boolean(r && !r.loading)
   const duration = currentDuration()
   const time = currentTime()
 
@@ -1098,6 +1415,8 @@ function render() {
   ui.peerStatus.textContent = peerCount ? 'Friend connected' : 'Waiting for your friend to join…'
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
   renderPeople()
+  renderPlaylist()
+  sampleTabTone()
   syncBoardLayout()
   syncPresence()
   const health = peerCount && session.link ? describeLink({selfRole: role, ...session.link}) : null
@@ -1111,14 +1430,27 @@ function render() {
   const problem = health && health.level !== 'good'
   ui.linkWarning.hidden = !problem
   if (problem) ui.linkWarningTip.textContent = health.detail
-  ui.title.textContent = host ? player.media?.title || player.media?.name || '' : r?.title || ''
+  ui.title.textContent = (host ? hostedTitle() : r?.title) || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
   ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: ''}[role]
 
-  ui.stage.classList.toggle('waiting', role === 'viewer' && !ready)
-  ui.emptyText.textContent =
-    role === 'viewer' ? 'Your friend is opening a video…' : 'Drop a video here, or open one to host it.'
-  const stalled = host ? player.loaded && !ui.localVideo.paused && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
+  const image = shownImage()
+  const imageMode = Boolean(host ? session.image : r?.image)
+  const receivingImage = role === 'viewer' && imageMode && !image
+  ui.stage.classList.toggle('showing-image', imageMode)
+  showPicture(image?.url || null)
+
+  ui.stage.classList.toggle('waiting', role === 'viewer' && (!ready || receivingImage))
+  const progress = receivingImage && session.imageProgress?.id === r.image.id ? session.imageProgress.percent : 0
+  ui.emptyText.textContent = receivingImage
+    ? `Receiving the picture… ${Math.round(progress * 100)}%`
+    : role === 'viewer'
+      ? 'Your friend is opening something…'
+      : 'Drop a video, song or picture here, or open one to host it.'
+  const audioOnly = ready && (host ? Boolean(player.media && !player.media.video) : Boolean(r?.audioOnly))
+  ui.audioOnly.hidden = !audioOnly
+  if (audioOnly) ui.audioOnlyTitle.textContent = ui.title.textContent
+  const stalled = host ? player.loaded && hostPlaying() && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
   ui.spinner.hidden = !stalled
 
   ui.controls.classList.toggle('disabled', !ready)
@@ -1139,9 +1471,10 @@ function render() {
     ...(state?.subtitles || []).map((s) => ({value: s.value, label: s.image ? `${s.label} · for everyone` : s.label})),
     ...session.localSubtitles,
   ]
+  // With no tracks there's nothing to pick; dropping a subtitle file on the stage adds one.
+  ui.subtitles.hidden = subtitles.length <= 1
   if (ready) subtitles.push({value: LOAD_SUBTITLE, label: 'Load subtitle file…'})
   fillSelect(ui.subtitles, subtitles, session.captions.id ?? state?.subtitleSelected ?? '')
-  ui.subtitles.hidden = subtitles.length <= 1
 
   if (!isPlaying()) ui.room.classList.remove('idle')
   else if (!chromeTimer && !ui.room.classList.contains('idle')) wakeChrome()
@@ -1237,6 +1570,143 @@ try {
   setPeopleOpen(true)
 }
 
+for (const handle of [ui.playlistTab, ui.playlistEdge]) {
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return
+    event.preventDefault() // no text selection while dragging the edge
+    handle.setPointerCapture(event.pointerId)
+    tabDragged = false
+    tabDrag = {startX: event.clientX, startWidth: playlistOpen() ? fittedPlaylistWidth() : 0, width: null}
+  })
+  handle.addEventListener('pointermove', (event) => {
+    if (!tabDrag) return
+    const dx = event.clientX - tabDrag.startX
+    if (tabDrag.width == null && Math.abs(dx) < 4) return // still a click
+    ui.room.classList.add('resizing')
+    tabDrag.width = draggedWidth(tabDrag.startWidth, dx, maxDrawerWidth(innerWidth))
+    showPlaylistWidth(tabDrag.width)
+  })
+  handle.addEventListener('pointerup', endTabDrag)
+  handle.addEventListener('pointercancel', endTabDrag)
+}
+ui.playlistTab.addEventListener('click', () => {
+  if (tabDragged) tabDragged = false
+  else setPlaylistOpen(!playlistOpen())
+})
+window.addEventListener('resize', () => {
+  if (playlistOpen() && !tabDrag) showPlaylistWidth(fittedPlaylistWidth())
+})
+const setTabNear = (near) => ui.playlistTab.style.setProperty('--tab-near', near.toFixed(2))
+ui.room.addEventListener('mousemove', (event) => {
+  const box = ui.playlistTab.getBoundingClientRect()
+  const dx = Math.max(box.left - event.clientX, 0, event.clientX - box.right)
+  const dy = Math.max(box.top - event.clientY, 0, event.clientY - box.bottom)
+  setTabNear(proximity(Math.hypot(dx, dy)))
+})
+document.documentElement.addEventListener('mouseleave', () => setTabNear(0))
+try {
+  const saved = JSON.parse(localStorage.getItem('playlist'))
+  if (Number.isFinite(saved?.width)) playlistWidth = Math.min(DRAWER.maxWidth, Math.max(DRAWER.minWidth, saved.width))
+  setPlaylistOpen(Boolean(saved?.open))
+} catch {
+  setPlaylistOpen(false)
+}
+
+ui.playlistAdd.addEventListener('click', async () => addToPlaylist(await window.api.chooseMediaFiles()))
+
+// Reordering, like Spotify: hold a row and drag it. It follows the pointer (kept inside the list), the
+// rows it passes slide aside to open a gap where it will land, and near the top or bottom edge the
+// list scrolls. On release it glides into the gap, then the list is reordered for everyone.
+const SETTLE_MS = 170
+let itemDrag = null // {id, row, rows, tops, from, to, startY, startScroll, y, lifted, settling} while a row is held
+
+function updateItemDrag() {
+  const {row, rows, tops, from, startY, startScroll, y} = itemDrag
+  const dy = clampDrag(tops, from, y - startY + ui.playlistItems.scrollTop - startScroll)
+  const to = dropIndex(tops, from, dy)
+  row.style.transform = `translateY(${dy}px)`
+  if (to === itemDrag.to) return
+  itemDrag.to = to
+  rows.forEach((r, i) => {
+    if (r !== row) r.style.transform = `translateY(${slotShift(tops, i, from, to)}px)`
+  })
+}
+
+function scrollItemDrag() {
+  if (!itemDrag?.lifted || itemDrag.settling) return
+  const box = ui.playlistItems.getBoundingClientRect()
+  const edge = 40
+  const over = itemDrag.y < box.top + edge ? itemDrag.y - box.top - edge : itemDrag.y > box.bottom - edge ? itemDrag.y - box.bottom + edge : 0
+  if (over) {
+    ui.playlistItems.scrollTop += Math.max(-14, Math.min(14, over / 3))
+    updateItemDrag()
+  }
+  requestAnimationFrame(scrollItemDrag)
+}
+
+function endItemDrag(commit) {
+  const drag = itemDrag
+  if (!drag || drag.settling) return
+  if (!drag.lifted) return void (itemDrag = null)
+  drag.settling = true
+  const to = commit ? drag.to : drag.from
+  drag.row.classList.add('settling')
+  drag.row.style.transform = `translateY(${drag.tops[to] - drag.tops[drag.from]}px)`
+  if (!commit) drag.rows.forEach((r) => r !== drag.row && (r.style.transform = ''))
+  setTimeout(() => {
+    itemDrag = null
+    // Without the reordering class the rows lose their transition, so clearing the shifts is
+    // instant and the rebuilt list appears exactly where the rows already are.
+    ui.playlist.classList.remove('reordering')
+    for (const r of drag.rows) {
+      r.classList.remove('lifted', 'settling')
+      r.style.transform = ''
+    }
+    if (commit) moveInPlaylist(drag.id, to)
+    render()
+  }, SETTLE_MS)
+}
+
+ui.playlistItems.addEventListener('pointerdown', (event) => {
+  const row = event.target.closest('.playlist-item')
+  if (itemDrag || !row || event.button !== 0 || event.target.closest('button')) return
+  row.setPointerCapture(event.pointerId)
+  const rows = [...ui.playlistItems.children]
+  const from = rows.indexOf(row)
+  const tops = rows.map((r) => r.offsetTop)
+  const start = {startY: event.clientY, startScroll: ui.playlistItems.scrollTop, y: event.clientY}
+  itemDrag = {id: row.dataset.id, row, rows, tops, from, to: from, ...start, lifted: false, settling: false}
+})
+ui.playlistItems.addEventListener('pointermove', (event) => {
+  if (!itemDrag || itemDrag.settling) return
+  itemDrag.y = event.clientY
+  if (!itemDrag.lifted) {
+    if (Math.abs(event.clientY - itemDrag.startY) < 4) return // still a click
+    itemDrag.lifted = true
+    itemDrag.row.classList.add('lifted')
+    ui.playlist.classList.add('reordering')
+    requestAnimationFrame(scrollItemDrag)
+  }
+  updateItemDrag()
+})
+ui.playlistItems.addEventListener('pointerup', () => endItemDrag(true))
+ui.playlistItems.addEventListener('pointercancel', () => endItemDrag(false))
+ui.playlistItems.addEventListener('lostpointercapture', () => endItemDrag(false))
+// Dropping files on the playlist, or on its tab while it's closed, adds them all.
+ui.playlist.addEventListener('dragover', (event) => {
+  event.preventDefault()
+  ui.playlist.classList.add('dropping')
+  if (!playlistOpen()) setPlaylistOpen(true)
+})
+ui.playlist.addEventListener('dragleave', (event) => {
+  if (!ui.playlist.contains(event.relatedTarget)) ui.playlist.classList.remove('dropping')
+})
+ui.playlist.addEventListener('drop', (event) => {
+  event.preventDefault()
+  ui.playlist.classList.remove('dropping')
+  addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)))
+})
+
 // The display name picked on the welcome screen, or changed since.
 let savedName = null
 try {
@@ -1315,7 +1785,7 @@ ui.newUsername.addEventListener('click', () => showWelcome('change'))
 
 for (const button of ui.openButtons) {
   button.addEventListener('click', async () => {
-    const filePath = await window.api.chooseVideo()
+    const filePath = await window.api.chooseMedia()
     if (filePath) hostFile(filePath)
   })
 }
@@ -1325,8 +1795,9 @@ ui.loop.addEventListener('click', toggleLoop)
 ui.localVideo.addEventListener('click', togglePlay)
 ui.remoteVideo.addEventListener('click', togglePlay)
 ui.stage.addEventListener('dblclick', (event) => {
-  if (event.target instanceof HTMLVideoElement) toggleFullscreen()
+  if (event.target instanceof HTMLVideoElement || event.target === ui.picture) toggleFullscreen()
 })
+ui.picture.addEventListener('load', () => render()) // the whiteboard lines up once its size is known
 ui.fullscreen.addEventListener('click', toggleFullscreen)
 
 ui.seek.addEventListener('input', () => {
@@ -1372,8 +1843,10 @@ for (const type of ['play', 'pause', 'seeked', 'waiting', 'playing']) {
   ui.localVideo.addEventListener(type, () => broadcastState())
 }
 // Seeking back to the start works whether it's still buffered (a short clip) or ffmpeg has to restart.
+// Without loop, a file started from the playlist moves on to the next item.
 ui.localVideo.addEventListener('ended', () => {
-  if (!isHost() || !session.loop) return
+  if (!isHost()) return
+  if (!session.loop) return playNext()
   player.seek(0)
   ui.localVideo.play().catch(() => {})
 })
@@ -1403,6 +1876,8 @@ document.addEventListener('keydown', (event) => {
     toggleLoop()
   } else if (event.code === 'KeyF') {
     toggleFullscreen()
+  } else if (event.code === 'KeyP') {
+    setPlaylistOpen(!playlistOpen())
   } else if (event.code === 'KeyM') {
     setVolume(Number(ui.volume.value) > 0 ? 0 : 1)
   } else {
@@ -1416,14 +1891,38 @@ for (const [kind, {emoji, label, key}] of Object.entries(REACTIONS)) {
   button.dataset.reaction = kind
   button.title = `${label} (${key.replace('Digit', '')})`
   button.setAttribute('aria-label', label)
-  button.addEventListener('click', () => react(kind))
+  button.addEventListener('click', () => {
+    react(kind)
+    setReactionsOpen(false)
+  })
   ui.reactions.append(button)
 }
+
+// Reactions live in a menu that opens upward from one button in the controls.
+function setReactionsOpen(open) {
+  ui.reactions.hidden = !open
+  ui.reactionsToggle.setAttribute('aria-expanded', String(open))
+}
+ui.reactionsToggle.addEventListener('click', () => setReactionsOpen(ui.reactions.hidden))
+document.addEventListener('pointerdown', (event) => {
+  if (!ui.reactions.hidden && !event.target.closest('.reaction-menu')) setReactionsOpen(false)
+})
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return
+  setReactionsOpen(false)
+  endItemDrag(false)
+})
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
 let chromeTimer = null
 const chromeInUse = () =>
-  Boolean(drawing || ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, select:focus, input:focus'))
+  Boolean(
+    drawing ||
+      tabDrag ||
+      itemDrag ||
+      !ui.reactions.hidden ||
+      ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, .playlist:hover, select:focus, input:focus'),
+  )
 function wakeChrome() {
   ui.room.classList.remove('idle')
   clearTimeout(chromeTimer)

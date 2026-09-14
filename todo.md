@@ -1,3 +1,7 @@
+
+add loop button (synced)
+change word 'video' to 'media' and allow all media types.
+
 # TODO
 
 - q: is there a way for the client to like... buffer/cache videos that the host uploads/plays so that if one client has shit internet, they don't get hickups, and the playback between host and client remain really well synced with no dropouts or delays or latency or whatever

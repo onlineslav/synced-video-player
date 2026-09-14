@@ -249,7 +249,7 @@ export class StreamPlayer extends EventTarget {
   // (e.g. HEVC without a hardware decoder). Retry once with full conversion.
   async recoverFromDecodeError() {
     if (!this.media || !this.video.error) return
-    if (this.forceTranscode) return this.fail(new Error(this.video.error.message || 'This video could not be decoded.'))
+    if (this.forceTranscode) return this.fail(new Error(this.video.error.message || 'This file could not be decoded.'))
     const resumeAt = this.video.currentTime
     const wasPlaying = !this.video.paused
     this.forceTranscode = true

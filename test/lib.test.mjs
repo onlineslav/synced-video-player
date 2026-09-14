@@ -1,6 +1,26 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {formatTime, generateRoomCode, isNewerClaim, normalizeRoomCode, preferHighStartBitrate, preferStereoOpus} from '../renderer/lib.mjs'
+import {
+  formatTime,
+  generateRoomCode,
+  isImageMime,
+  isImagePath,
+  isNewerClaim,
+  normalizeRoomCode,
+  preferHighStartBitrate,
+  preferStereoOpus,
+} from '../renderer/lib.mjs'
+
+test('isImagePath and isImageMime recognise pictures that can be shared', () => {
+  assert.ok(isImagePath('C:\\Photos\\Cat.JPG'))
+  assert.ok(isImagePath('/scans/page.tiff'))
+  assert.ok(!isImagePath('movie.mkv'))
+  assert.ok(!isImagePath('C:\\folder.png\\notes'))
+  assert.ok(!isImagePath('odd.constructor'))
+  assert.ok(isImageMime('image/webp'))
+  assert.ok(!isImageMime('image/svg+xml'))
+  assert.ok(!isImageMime(undefined))
+})
 
 test('preferHighStartBitrate adds the hint to video codecs, with or without an fmtp line', () => {
   const sdp = [

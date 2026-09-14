@@ -1,10 +1,12 @@
 const {contextBridge, ipcRenderer, webUtils} = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
-  chooseVideo: () => ipcRenderer.invoke('dialog:video'),
+  chooseMedia: () => ipcRenderer.invoke('dialog:media'),
+  chooseMediaFiles: () => ipcRenderer.invoke('dialog:media-files'),
   chooseSubtitle: () => ipcRenderer.invoke('dialog:subtitle'),
   pathForFile: (file) => webUtils.getPathForFile(file),
   probe: (filePath) => ipcRenderer.invoke('media:probe', filePath),
+  readImage: (filePath) => ipcRenderer.invoke('media:image', filePath),
   startSession: (options) => ipcRenderer.invoke('session:start', options),
   pull: (sessionId) => ipcRenderer.invoke('session:pull', sessionId),
   stopSession: (sessionId) => ipcRenderer.invoke('session:stop', sessionId),

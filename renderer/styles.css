@@ -132,7 +132,7 @@ button.ghost {
 .join-requests {
   position: absolute;
   top: 120px;
-  left: 50%;
+  left: calc((100% - var(--playlist-width)) / 2);
   z-index: 4;
   display: flex;
   flex-direction: column;
@@ -530,9 +530,320 @@ button:disabled {
 /* Room */
 
 .room {
+  --playlist-width: 0px;
   position: relative;
   height: 100%;
   background: #000;
+}
+
+/* The playlist docks on the right; everything else in the room makes room for it. */
+.room:not(.resizing) :is(.stage, .topbar, .sidebar, .reaction-feed, .playlist) {
+  transition-property: right, width, opacity, transform;
+  transition-duration: 0.2s, 0.2s, 0.25s, 0.25s;
+}
+
+.playlist {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  width: var(--playlist-width);
+}
+
+.playlist-body {
+  height: 100%;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.room:not(.playlist-open) .playlist-body {
+  border-left: 0;
+}
+
+/* Fixed width, so pulling the drawer out uncovers it instead of squashing it. */
+.playlist-inner {
+  width: max(var(--playlist-width), 220px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+/* The open panel's left edge resizes it too, or hides it when dragged most of the way closed. */
+.playlist-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  z-index: 1;
+  width: 10px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.playlist-edge::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.playlist-edge:hover::after,
+.room.resizing .playlist-edge::after {
+  opacity: 0.7;
+}
+
+.room:not(.playlist-open) .playlist-edge {
+  display: none;
+}
+
+/* Just a chevron: faint until the mouse comes near (--tab-near, 0..1), black over bright pictures. */
+.playlist-tab {
+  --tab-near: 0;
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 44px; /* a generous target; the chevron inside stays small */
+  height: 160px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  opacity: calc(0.3 + 0.7 * var(--tab-near));
+  transform: translateY(-50%);
+  cursor: ew-resize;
+  touch-action: none;
+  transition:
+    opacity 0.15s,
+    color 0.3s;
+}
+
+.playlist-tab:hover,
+.playlist-tab:focus-visible {
+  opacity: 1;
+}
+
+.playlist-tab svg {
+  width: 28px;
+  height: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+  transition: filter 0.3s;
+}
+
+.playlist-tab[data-tone='dark'] {
+  color: #111;
+}
+
+.playlist-tab[data-tone='dark'] svg {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.6));
+}
+
+/* Opening flips the chevron through its apex: the arms swing across (through a straight line) from
+   < to >, keeping their stroke width, instead of the whole arrow spinning around. */
+.playlist-tab path {
+  d: path('M18 3L12 14L18 25');
+  transition: d 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.room.playlist-open .playlist-tab path {
+  d: path('M6 3L12 14L6 25');
+}
+
+/* Gone with the rest of the UI, and in fullscreen unless the playlist is open (P still opens it). */
+.room.idle .playlist-tab,
+.room:fullscreen:not(.playlist-open) .playlist-tab {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.playlist-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Sits right after the last item, so it's where the next one will go. */
+.playlist-add {
+  flex: none;
+  align-self: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.playlist-add:hover {
+  border-color: var(--accent);
+  background: rgba(124, 108, 255, 0.12);
+  color: var(--text);
+}
+
+.playlist-add svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.playlist-items {
+  position: relative; /* rows' offsetTop is measured from the list, whatever its scroll */
+  list-style: none;
+  min-height: 0; /* lets a long list scroll while the plus stays in view below it */
+  margin: 0 -6px;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.playlist-items:empty {
+  display: none;
+}
+
+.playlist-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.playlist.dropping .playlist-body {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+  background: #1b1a2a;
+}
+
+.playlist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  position: relative;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: grab;
+  user-select: none;
+}
+
+.playlist-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Reordering: the held row lifts and follows the pointer, and the other rows slide aside to open a
+   gap where it will land. On release it glides into the gap. */
+.playlist.reordering,
+.playlist.reordering * {
+  cursor: grabbing !important;
+}
+
+.playlist.reordering .playlist-item:not(.lifted) {
+  background: transparent;
+  transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.playlist-item.lifted {
+  z-index: 1;
+  border-color: var(--line);
+  background: #25242f !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+}
+
+.playlist-item.lifted.settling {
+  box-shadow: none;
+  transition:
+    transform 0.16s cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 0.16s;
+}
+
+.playlist-item.current {
+  border-color: var(--accent);
+  background: rgba(124, 108, 255, 0.12);
+}
+
+.playlist-item.missing .person-main {
+  opacity: 0.5;
+}
+
+.playlist-item .person-main {
+  flex: 1;
+}
+
+.playlist-item .person-name {
+  font-size: 13px;
+}
+
+.playlist-item.current .person-stats {
+  color: #b9b0ff;
+}
+
+.playlist-play,
+.playlist-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.playlist-play svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.playlist-play:hover:not(:disabled),
+.playlist-remove:hover {
+  color: var(--text);
+}
+
+.playlist-item.current .playlist-play {
+  color: var(--accent);
+}
+
+.playlist-remove {
+  opacity: 0;
+}
+
+.playlist-item:hover .playlist-remove,
+.playlist-remove:focus {
+  opacity: 1;
 }
 
 /* The top bar floats over the video so hiding it never resizes the picture. */
@@ -540,16 +851,13 @@ button:disabled {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
+  right: var(--playlist-width);
   z-index: 3;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px 12px 22px;
   background: linear-gradient(rgba(0, 0, 0, 0.85) 55%, transparent);
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
 }
 
 .room.idle {
@@ -718,7 +1026,7 @@ button:disabled {
 .sidebar {
   position: absolute;
   top: 64px;
-  right: 12px;
+  right: calc(var(--playlist-width) + 12px);
   z-index: 3;
   width: 260px;
   max-height: calc(100% - 64px - 90px);
@@ -728,9 +1036,6 @@ button:disabled {
   border-radius: 10px;
   background: rgba(22, 22, 29, 0.9);
   backdrop-filter: blur(8px);
-  transition:
-    opacity 0.25s,
-    transform 0.25s;
 }
 
 .room:not(.people-open) .sidebar {
@@ -894,6 +1199,7 @@ button:disabled {
 .stage {
   position: absolute;
   inset: 0;
+  right: var(--playlist-width);
   background: #000;
   overflow: hidden;
 }
@@ -910,6 +1216,19 @@ button:disabled {
 .stage[data-role='host'] video.local,
 .stage[data-role='viewer'] video.remote {
   display: block;
+}
+
+.stage .picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.stage.showing-image video.local,
+.stage.showing-image video.remote {
+  display: none;
 }
 
 .stage {
@@ -954,6 +1273,31 @@ button:disabled {
 .stage[data-role='idle'] .empty,
 .stage.waiting .empty {
   display: flex;
+}
+
+.audio-only {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.audio-only svg {
+  width: 96px;
+  height: 96px;
+  fill: currentColor;
+}
+
+.audio-only p {
+  max-width: 80%;
+  margin: 0;
+  font-size: 18px;
+  text-align: center;
 }
 
 .stage.dragging::after {
@@ -1081,19 +1425,37 @@ button:disabled {
   transition: opacity 0.2s;
 }
 
-/* Without a video only the reactions work. */
-.controls.disabled > :not(.reactions) {
+/* With nothing open only the reactions and volume work. */
+.controls.disabled > :not(.reaction-menu, .volume-icon, .volume) {
   opacity: 0.35;
   pointer-events: none;
 }
 
+.reaction-menu {
+  position: relative;
+}
+
+#reactions-toggle[aria-expanded='true'] svg {
+  fill: var(--accent);
+}
+
 .reactions {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 5;
   display: flex;
+  flex-direction: column;
   gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(22, 22, 29, 0.95);
+  transform: translateX(-50%);
 }
 
 .reaction {
-  padding: 3px 5px;
+  padding: 6px 8px;
   border-color: transparent;
   background: transparent;
   font-size: 19px;
@@ -1112,7 +1474,7 @@ button:disabled {
 
 .reaction-feed {
   position: absolute;
-  right: 16px;
+  right: calc(var(--playlist-width) + 16px);
   bottom: 84px;
   z-index: 4;
   display: flex;

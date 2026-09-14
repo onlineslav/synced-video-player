@@ -3,7 +3,18 @@
 const {execFile, spawn} = require('node:child_process')
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const {ENCODER_ARGS, externalSubtitle, isSubtitleSidecar, parseWebVtt, planSession, subtitleExtractArgs, summarizeProbe} = require('./plan')
+const {maxBytes: MAX_IMAGE_BYTES} = require('../shared/images.json')
+const {
+  ENCODER_ARGS,
+  externalSubtitle,
+  imageConvertArgs,
+  imageMime,
+  isSubtitleSidecar,
+  parseWebVtt,
+  planSession,
+  subtitleExtractArgs,
+  summarizeProbe,
+} = require('./plan')
 
 // Binaries can't execute from inside the asar archive; electron-builder unpacks them beside it.
 const unpacked = (p) => p.replace('app.asar', 'app.asar.unpacked')
@@ -15,9 +26,9 @@ const MAX_PULL_BYTES = 8 * 1024 * 1024
 
 const lastLine = (text) => String(text).trim().split(/\r?\n/).pop()
 
-function run(bin, args) {
+function run(bin, args, encoding = 'utf8') {
   return new Promise((resolve, reject) => {
-    execFile(bin, args, {maxBuffer: 64 * 1024 * 1024, windowsHide: true}, (err, stdout, stderr) => {
+    execFile(bin, args, {encoding, maxBuffer: 64 * 1024 * 1024, windowsHide: true}, (err, stdout, stderr) => {
       if (err) reject(new Error(lastLine(stderr) || err.message))
       else resolve(stdout)
     })
@@ -193,4 +204,15 @@ async function readCues(filePath, subtitleId) {
   )
 }
 
-module.exports = {detectCapabilities, probe, pull, startSession, stopAll, stopSession, subtitleCues}
+// Images aren't streamed: the renderer sends the bytes to everyone. Formats Chromium can't show
+// are converted to PNG first.
+async function readImage(filePath) {
+  const mime = imageMime(filePath)
+  const tooBig = () => new Error(`That image is too big to share (the limit is ${MAX_IMAGE_BYTES / 2 ** 20} MB).`)
+  if (mime && (await fs.stat(filePath)).size > MAX_IMAGE_BYTES) throw tooBig()
+  const bytes = mime ? await fs.readFile(filePath) : await run(FFMPEG, imageConvertArgs(filePath), 'buffer')
+  if (bytes.length > MAX_IMAGE_BYTES) throw tooBig()
+  return {name: path.basename(filePath), mime: mime || 'image/png', bytes}
+}
+
+module.exports = {detectCapabilities, probe, pull, readImage, startSession, stopAll, stopSession, subtitleCues}

@@ -1,6 +1,23 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const {escapeFilterValue, isSubtitleSidecar, parseWebVtt, planSession, subtitleExtractArgs, summarizeProbe} = require('../main/plan')
+const {
+  escapeFilterValue,
+  imageConvertArgs,
+  imageMime,
+  isSubtitleSidecar,
+  parseWebVtt,
+  planSession,
+  subtitleExtractArgs,
+  summarizeProbe,
+} = require('../main/plan')
+
+test('images Chromium can show are sent as-is; others are converted to one PNG frame', () => {
+  assert.equal(imageMime('C:\\Photos\\Cat.JPG'), 'image/jpeg')
+  assert.equal(imageMime('clip.webp'), 'image/webp')
+  assert.equal(imageMime('scan.tiff'), null)
+  assert.equal(imageMime('odd.constructor'), null)
+  assert.deepEqual(imageConvertArgs('scan.tiff').slice(-6), ['1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1'])
+})
 
 const probe = {
   format: {duration: '5400.5', tags: {title: 'Movie'}},
@@ -38,6 +55,21 @@ test('passes supported 8-bit video through and seeks to the keyframe', () => {
   assert.equal(plan.mime, 'video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.40.2"')
   assert.deepEqual(plan.args.slice(3, 7), ['-ss', '97.700', '-i', 'C:\\Movies\\movie.mkv'])
   assert.ok(plan.args.includes('copy'))
+})
+
+test('streams an audio file as audio-only mp4, treating cover art as no video', () => {
+  const song = summarizeProbe({
+    format: {duration: '215.2'},
+    streams: [
+      {index: 0, codec_type: 'audio', codec_name: 'flac', channels: 2},
+      {index: 1, codec_type: 'video', codec_name: 'mjpeg', disposition: {attached_pic: 1}},
+    ],
+  })
+  assert.equal(song.video, null)
+  const plan = planSession({media: song, filePath: 'song.flac', audioIndex: 0, support: allSupported})
+  assert.equal(plan.transcoding, false)
+  assert.equal(plan.mime, 'audio/mp4; codecs="mp4a.40.2"')
+  assert.ok(!plan.args.includes('-c:v'))
 })
 
 test('transcodes 10-bit video even when Chromium can decode it, and tonemaps HDR', () => {

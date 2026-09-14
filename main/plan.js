@@ -1,6 +1,7 @@
 // Pure decisions about how to turn any file ffmpeg can read into a fragmented MP4 that
 // Chromium's MediaSource can play. No I/O here so it stays unit-testable.
 const CODECS = require('../shared/codecs.json')
+const IMAGES = require('../shared/images.json')
 
 const IMAGE_SUBTITLE_CODECS = new Set(['hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'xsub'])
 const SUBTITLE_EXTENSIONS = ['.srt', '.ass', '.ssa', '.vtt']
@@ -233,10 +234,22 @@ function parseWebVtt(text) {
   return cues.sort((a, b) => a.start - b.start)
 }
 
+// Mime type of an image Chromium shows as-is, or null if ffmpeg has to convert it to PNG first.
+function imageMime(filePath) {
+  const ext = (/\.([^.\\/]+)$/.exec(filePath)?.[1] || '').toLowerCase()
+  return Object.hasOwn(IMAGES.native, ext) ? IMAGES.native[ext] : null
+}
+
+function imageConvertArgs(filePath) {
+  return ['-v', 'error', '-nostdin', '-i', filePath, '-frames:v', '1', '-c:v', 'png', '-f', 'image2pipe', 'pipe:1']
+}
+
 module.exports = {
   ENCODER_ARGS,
   escapeFilterValue,
   externalSubtitle,
+  imageConvertArgs,
+  imageMime,
   isSubtitleSidecar,
   parseWebVtt,
   planSession,

@@ -1,8 +1,9 @@
 # Synced Video Player
 
-Watch a video file together from two computers (Windows or Mac, in any combination). One person hosts and streams the file. Either person can play, pause, seek, or switch the audio track, and both see the change.
+Watch or listen to a media file together from two computers (Windows or Mac, in any combination). One person hosts and streams the file. Either person can play, pause, seek, or switch the audio track, and both see the change.
 
-- Plays almost anything VLC plays (MKV, HEVC, AV1, AC3/DTS/TrueHD audio, XviD, 10-bit, HDR), because ffmpeg is bundled.
+- Plays almost anything VLC plays (MKV, HEVC, AV1, AC3/DTS/TrueHD audio, XviD, 10-bit, HDR), plus audio files (MP3, FLAC, WAV, M4A, Opus…), because ffmpeg is bundled.
+- Pictures (JPG, PNG, GIF, WebP, AVIF, TIFF, PSD…, up to 50 MB) are sent to the other person at full resolution, so you can both look and draw on them.
 - Subtitles: tracks inside the file, `.srt`/`.ass`/`.ssa`/`.vtt` files next to the video, or any subtitle file you drop in. Each person picks their own track, or none. Image subtitles (Blu-ray PGS, DVD VobSub) can only be drawn into the picture, so those show for everyone.
 - No accounts, no port forwarding, no servers to run.
 
@@ -10,11 +11,13 @@ Watch a video file together from two computers (Windows or Mac, in any combinati
 
 1. One person clicks **Create a room** and sends the code (e.g. `K7QM-2XPA`) to the other.
 2. The other person types the code and clicks **Join**.
-3. Whoever clicks **Open video** (or drops a file on the window) hosts it. If the other person opens a video later, they become the host.
+3. Whoever clicks **Open media** (or drops a file on the window) hosts it. If the other person opens a file later, they become the host.
 
 In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
 
-Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute · `1`–`4` reactions.
+The playlist lives behind the tab on the right edge: click it, or drag it out to the width you like. Anyone can add files to it (or drop them on it), drag items to reorder them, and play any item. The file stays on the computer of whoever added it, and their app hosts it when it plays, so an item can't play once that person leaves. When a file ends, the next one starts (unless loop is on).
+
+Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute · `P` playlist · `1`–`4` reactions.
 
 ### Friends
 
