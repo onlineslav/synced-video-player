@@ -59,9 +59,7 @@ function registerIpc() {
   })
 }
 
-module.exports = {createWindow, registerIpc}
-
-if (require.main === module) {
+function start() {
   app.whenReady().then(() => {
     registerIpc()
     createWindow()
@@ -73,3 +71,5 @@ if (require.main === module) {
   app.on('window-all-closed', () => app.quit())
   app.on('before-quit', () => media.stopAll())
 }
+
+module.exports = {createWindow, registerIpc, start}
