@@ -1,4 +1,4 @@
-// Who you are to your friends. A username is a handle you pick plus a tag, like jeromy#k7qm-x3pa.
+// Who you are to your friends. A username is a handle you pick plus a tag, like moviefan#k7qm-x3pa.
 // Each install keeps an ECDSA key pair and the tag is a hash of the handle and the public key, so
 // nobody can take your username without your key. Picking a new username makes a new key pair,
 // and friends have to add you again.

@@ -580,7 +580,6 @@ function shareProfile() {
 // screen comes back here to pick a new username.
 
 let welcome = null // {mode: 'first' | 'change', keys} while the screen is open
-let suggestedName = null // the computer's user name, as a placeholder
 
 async function showWelcome(mode) {
   const changing = mode === 'change'
@@ -591,7 +590,6 @@ async function showWelcome(mode) {
     : 'Pick a username friends can add you by, and the name people see.'
   ui.handle.value = changing ? identity.handle : ''
   ui.welcomeName.value = changing ? myName : ''
-  ui.welcomeName.placeholder = suggestedName || 'Your name'
   ui.welcomeCancel.hidden = !changing
   ui.home.hidden = true
   ui.welcome.hidden = false
@@ -1217,7 +1215,7 @@ try {
   setPeopleOpen(true)
 }
 
-// Until someone picks a display name, it's their computer's user name.
+// The display name picked on the welcome screen, or changed since.
 let savedName = null
 try {
   savedName = cleanDisplayName(localStorage.getItem('displayName'))
@@ -1226,10 +1224,9 @@ if (savedName) myName = savedName
 bindNameInput(ui.profileName)
 
 // A new install, or an identity from before usernames had handles, starts on the welcome screen.
-Promise.all([loadIdentity(), window.api.iceServers().catch(() => []), window.api.userName().catch(() => null)]).then(
-  ([loaded, turnConfig, computerName]) => {
+Promise.all([loadIdentity(), window.api.iceServers().catch(() => [])]).then(
+  ([loaded, turnConfig]) => {
     friendNetwork.turnConfig = turnConfig
-    suggestedName = cleanDisplayName(computerName)
     if (loaded && savedName) finishWelcome(loaded, 'first')
     else showWelcome('first')
   },

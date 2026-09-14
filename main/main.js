@@ -1,4 +1,3 @@
-const os = require('node:os')
 const path = require('node:path')
 const {app, BrowserWindow, dialog, ipcMain} = require('electron')
 const media = require('./media')
@@ -50,13 +49,6 @@ function registerIpc() {
   ipcMain.handle('session:stop', (_event, id) => media.stopSession(id))
   ipcMain.handle('subtitle:cues', (_event, options) => media.subtitleCues(options))
   ipcMain.handle('net:ice-servers', () => loadIceServers(turnConfigPath()))
-  ipcMain.handle('app:user-name', () => {
-    try {
-      return os.userInfo().username
-    } catch {
-      return null
-    }
-  })
 }
 
 function start() {

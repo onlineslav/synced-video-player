@@ -18,7 +18,7 @@ Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M`
 
 ### Friends
 
-The first time the app opens it asks for a username and a display name. The app adds a tag to the username so it's yours alone (e.g. `jeromy#k7qm-x3pa`). Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. The friends list shows who's online, who's in a room, and what they're hosting. Click **Ask to join** next to a friend in a room; if they let you in, you join without needing the code. Your display name is separate and can be changed any time. Picking a new username means friends have to add you again.
+The first time the app opens it asks for a username and a display name. The app adds a tag to the username so it's yours alone (e.g. `moviefan#k7qm-x3pa`). Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. The friends list shows who's online, who's in a room, and what they're hosting. Click **Ask to join** next to a friend in a room; if they let you in, you join without needing the code. Your display name is separate and can be changed any time. Picking a new username means friends have to add you again.
 
 ## Installing
 
