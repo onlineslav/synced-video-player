@@ -51,7 +51,7 @@ const memoryStorage = () => {
 }
 
 async function person(net, selfId, name) {
-  const identity = await createIdentity()
+  const identity = await createIdentity('tester')
   const storage = memoryStorage()
   const friends = new FriendNetwork({joinRoom: net.joinRoomAs(selfId), selfId, appId: 'test', storage})
   friends.start(identity, {name})
@@ -67,8 +67,8 @@ async function until(check, what) {
 }
 
 test('signed hellos prove a username and only for the room and peers they name', async () => {
-  const me = await createIdentity()
-  const other = await createIdentity()
+  const me = await createIdentity('tester')
+  const other = await createIdentity('tester')
   const text = helloText('pair:x', 'peerA', 'peerB')
   const hello = {username: me.username, publicKey: me.publicKey, signature: await sign(me, text)}
   assert.ok(await verifySigned(hello, text))
@@ -114,11 +114,11 @@ test('adding someone sends a request they can accept, and then you are friends',
 test('a peer claiming someone else’s username is ignored', async () => {
   const net = fakeTrystero()
   const alice = await person(net, 'a', 'Alice')
-  const bob = await createIdentity()
+  const bob = await createIdentity('tester')
   alice.friends.add(bob.username)
 
   // Mallory knows both usernames and joins the pair room pretending to be Bob.
-  const mallory = await createIdentity()
+  const mallory = await createIdentity('tester')
   const room = net.joinRoomAs('m')({}, pairRoomId(alice.identity.username, bob.username))
   const hello = room.makeAction('hello')
   const profile = room.makeAction('profile')
@@ -136,7 +136,7 @@ test('add rejects bad input', async () => {
   const alice = await person(net, 'a', 'Alice')
   assert.match(alice.friends.add('hello'), /isn't a username/)
   assert.match(alice.friends.add(alice.identity.username), /your own/)
-  const other = (await createIdentity()).username
+  const other = (await createIdentity('tester')).username
   assert.equal(alice.friends.add(other), null)
   assert.match(alice.friends.add(other), /Already/)
   alice.friends.stop()

@@ -12,7 +12,7 @@ import {
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 import {FriendNetwork} from './friends.mjs'
-import {createIdentity, isValidIdentity, normalizeUsername} from './identity.mjs'
+import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
@@ -84,6 +84,16 @@ for (const method of ['createOffer', 'createAnswer', 'setLocalDescription']) {
 
 const $ = (id) => document.getElementById(id)
 const ui = {
+  welcome: $('welcome'),
+  welcomeForm: $('welcome-form'),
+  welcomeTitle: $('welcome-title'),
+  welcomeLede: $('welcome-lede'),
+  handle: $('handle'),
+  handleTag: $('handle-tag'),
+  handleHint: $('handle-hint'),
+  welcomeName: $('welcome-name'),
+  welcomeSubmit: $('welcome-submit'),
+  welcomeCancel: $('welcome-cancel'),
   home: $('home'),
   profileAvatar: $('profile-avatar'),
   profileName: $('profile-name'),
@@ -492,7 +502,7 @@ async function loadIdentity() {
     const stored = JSON.parse(localStorage.getItem('identity'))
     if (await isValidIdentity(stored)) return stored
   } catch {}
-  return saveIdentity(await createIdentity())
+  return null
 }
 
 function saveIdentity(next) {
@@ -537,6 +547,53 @@ function shareProfile() {
   renderProfile()
   session.profileAction?.send(myProfile()).catch(() => {})
   if (friendNetwork.identity) friendNetwork.updateProfile(myProfile())
+}
+
+// ---------- Welcome ----------
+// The first screen on a new install: pick a username and a display name. "Change" on the home
+// screen comes back here to pick a new username.
+
+let welcome = null // {mode: 'first' | 'change', keys} while the screen is open
+let suggestedName = null // the computer's user name, as a placeholder
+
+async function showWelcome(mode) {
+  const changing = mode === 'change'
+  welcome = {mode, keys: await createKeys()}
+  ui.welcomeTitle.textContent = changing ? 'Change your username' : 'Welcome'
+  ui.welcomeLede.textContent = changing
+    ? 'Friends who added you will have to add you again.'
+    : 'Pick a username friends can add you by, and the name people see.'
+  ui.handle.value = changing ? identity.handle : ''
+  ui.welcomeName.value = changing ? myName : ''
+  ui.welcomeName.placeholder = suggestedName || 'Your name'
+  ui.welcomeCancel.hidden = !changing
+  ui.home.hidden = true
+  ui.welcome.hidden = false
+  ui.handle.focus()
+  updateWelcome()
+}
+
+async function updateWelcome() {
+  const current = welcome
+  const handle = normalizeHandle(ui.handle.value)
+  const typed = ui.handle.value.trim() !== ''
+  ui.welcomeSubmit.disabled = !(current && handle && cleanDisplayName(ui.welcomeName.value))
+  ui.handleHint.textContent = typed && !handle ? `Usernames are ${HANDLE_HINT}` : 'The tag after # is added for you, so the username is yours alone.'
+  ui.handleHint.classList.toggle('invalid', typed && !handle)
+  const username = current && handle ? await usernameFor(current.keys.publicKey, handle) : null
+  if (welcome !== current || normalizeHandle(ui.handle.value) !== handle) return
+  ui.handleTag.textContent = username ? `#${username.split('#')[1]}` : '#····-····'
+}
+
+function finishWelcome(next, mode) {
+  identity = next
+  welcome = null
+  ui.welcome.hidden = true
+  ui.home.hidden = false
+  delete ui.username.dataset.original
+  if (mode === 'change') friendNetwork.restart(identity)
+  else friendNetwork.start(identity, myProfile())
+  shareProfile()
 }
 
 // ---------- Friends ----------
@@ -1016,16 +1073,38 @@ try {
   savedName = cleanDisplayName(localStorage.getItem('displayName'))
 } catch {}
 if (savedName) myName = savedName
-window.api.userName().then((name) => {
-  if (!savedName && cleanDisplayName(name)) myName = cleanDisplayName(name)
-  shareProfile()
-})
 bindNameInput(ui.profileName)
-Promise.all([loadIdentity(), window.api.iceServers().catch(() => [])]).then(([loaded, turnConfig]) => {
-  identity = loaded
-  friendNetwork.turnConfig = turnConfig
-  friendNetwork.start(identity, myProfile())
-  shareProfile()
+
+// A new install, or an identity from before usernames had handles, starts on the welcome screen.
+Promise.all([loadIdentity(), window.api.iceServers().catch(() => []), window.api.userName().catch(() => null)]).then(
+  ([loaded, turnConfig, computerName]) => {
+    friendNetwork.turnConfig = turnConfig
+    suggestedName = cleanDisplayName(computerName)
+    if (loaded && savedName) finishWelcome(loaded, 'first')
+    else showWelcome('first')
+  },
+)
+
+ui.handle.addEventListener('input', updateWelcome)
+ui.welcomeName.addEventListener('input', updateWelcome)
+ui.welcomeCancel.addEventListener('click', () => {
+  welcome = null
+  ui.welcome.hidden = true
+  ui.home.hidden = false
+})
+ui.welcomeForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const handle = normalizeHandle(ui.handle.value)
+  const name = cleanDisplayName(ui.welcomeName.value)
+  const current = welcome
+  if (!current || !handle || !name) return
+  ui.welcomeSubmit.disabled = true
+  const next = saveIdentity(await createIdentity(handle, current.keys))
+  myName = name
+  try {
+    localStorage.setItem('displayName', name)
+  } catch {}
+  finishWelcome(next, current.mode)
 })
 
 friendNetwork.addEventListener('change', renderFriends)
@@ -1054,13 +1133,7 @@ ui.username.addEventListener('click', async () => {
   flashButton(ui.username, copied ? 'Copied' : "Couldn't copy")
 })
 
-ui.newUsername.addEventListener('click', async () => {
-  if (!confirm('Make a new username? Friends who added you will have to add you again.')) return
-  identity = saveIdentity(await createIdentity())
-  delete ui.username.dataset.original
-  friendNetwork.restart(identity)
-  shareProfile()
-})
+ui.newUsername.addEventListener('click', () => showWelcome('change'))
 
 for (const button of ui.openButtons) {
   button.addEventListener('click', async () => {

@@ -55,7 +55,7 @@ export class FriendNetwork extends EventTarget {
   // Returns an error message, or null when added.
   add(input) {
     const username = normalizeUsername(input)
-    if (!username) return "That isn't a username. They look like k7qm-x3pa-trb2."
+    if (!username) return "That isn't a username. They look like jeromy#k7qm-x3pa."
     if (username === this.identity?.username) return "That's your own username."
     if (this.friends.has(username)) return 'Already in your friends.'
     const name = this.requests.get(username)?.name ?? null

@@ -195,6 +195,77 @@ button.small {
   text-align: center;
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.welcome-card {
+  text-align: left;
+}
+
+.welcome-card h1,
+.welcome-card .lede {
+  text-align: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field > input,
+.handle-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 16px;
+  color: var(--text);
+}
+
+.field > input {
+  padding: 10px 12px;
+}
+
+.field > input:focus,
+.handle-row:focus-within {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.handle-row {
+  display: flex;
+  align-items: center;
+}
+
+.handle-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 2px 10px 12px;
+  border: 0;
+  background: transparent;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  text-transform: lowercase;
+  outline: none;
+}
+
+.handle-tag {
+  padding-right: 12px;
+  font-family: ui-monospace, Consolas, Menlo, monospace;
+  color: var(--muted);
+}
+
+.hint {
+  font-size: 12px;
+}
+
+.hint.invalid {
+  color: var(--danger);
+}
+
 .profile-card {
   display: flex;
   align-items: center;

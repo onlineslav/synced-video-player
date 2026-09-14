@@ -10,7 +10,29 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main id="home" class="home">
+    <main id="welcome" class="home" hidden>
+      <form id="welcome-form" class="home-card welcome-card">
+        <h1 id="welcome-title">Welcome</h1>
+        <p id="welcome-lede" class="lede"></p>
+        <label class="field">
+          <span>Username</span>
+          <span class="handle-row">
+            <input id="handle" maxlength="20" autocomplete="off" spellcheck="false" placeholder="jeromy" />
+            <span id="handle-tag" class="handle-tag"></span>
+          </span>
+          <small id="handle-hint" class="hint"></small>
+        </label>
+        <label class="field">
+          <span>Display name</span>
+          <input id="welcome-name" maxlength="40" autocomplete="off" spellcheck="false" />
+          <small class="hint">What people see. You can change it any time.</small>
+        </label>
+        <button id="welcome-submit" class="primary big" type="submit" disabled>Continue</button>
+        <button id="welcome-cancel" class="ghost" type="button" hidden>Cancel</button>
+      </form>
+    </main>
+
+    <main id="home" class="home" hidden>
       <div class="home-layout">
       <div class="home-card">
         <section class="profile-card">

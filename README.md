@@ -16,7 +16,7 @@ Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M`
 
 ### Friends
 
-Your username (e.g. `k7qm-x3pa-trb2`) is on the home screen. Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. Your display name is separate and can be changed any time. Making a new username means friends have to add you again.
+The first time the app opens it asks for a username and a display name. The app adds a tag to the username so it's yours alone (e.g. `jeromy#k7qm-x3pa`). Send it to a friend, add theirs under **Friends**, and once they click **Add back** you're friends. Your display name is separate and can be changed any time. Picking a new username means friends have to add you again.
 
 ## Installing
 
