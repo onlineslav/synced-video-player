@@ -1040,8 +1040,90 @@ button:disabled {
   transition: opacity 0.2s;
 }
 
-.controls.disabled {
+/* Without a video only the reactions work. */
+.controls.disabled > :not(.reactions) {
   opacity: 0.35;
+  pointer-events: none;
+}
+
+.reactions {
+  display: flex;
+  gap: 2px;
+}
+
+.reaction {
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 19px;
+  line-height: 1;
+  transition: transform 0.1s;
+}
+
+.reaction:hover {
+  border-color: transparent;
+  transform: scale(1.2);
+}
+
+.reaction:active {
+  transform: scale(0.9);
+}
+
+.reaction-feed {
+  position: absolute;
+  right: 16px;
+  bottom: 84px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.reaction-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 6px;
+  border-radius: 999px;
+  background: rgba(22, 22, 29, 0.85);
+  font-size: 13px;
+  animation: reaction-float 2.6s ease-out forwards;
+}
+
+.reaction-emoji {
+  font-size: 26px;
+  line-height: 1;
+}
+
+@keyframes reaction-float {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.7);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0) scale(1.1);
+  }
+  20% {
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+}
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 

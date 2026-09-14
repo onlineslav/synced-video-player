@@ -12,7 +12,9 @@ Watch a video file together from two computers (Windows or Mac, in any combinati
 2. The other person types the code and clicks **Join**.
 3. Whoever clicks **Open video** (or drops a file on the window) hosts it. If the other person opens a video later, they become the host.
 
-Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute.
+In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
+
+Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute · `1`–`4` reactions.
 
 ### Friends
 

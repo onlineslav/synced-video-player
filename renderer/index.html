@@ -113,6 +113,7 @@
           <span id="time" class="time">0:00</span>
           <input id="seek" class="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek" />
           <span id="duration" class="time">0:00</span>
+          <div id="reactions" class="reactions" aria-label="Reactions"></div>
           <select id="audio-select" title="Audio track"></select>
           <select id="subtitle-select" title="Subtitles"></select>
           <svg class="volume-icon" viewBox="0 0 24 24"><path d="M4 9v6h4l5 5V4L8 9zm12.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z" /></svg>
@@ -129,6 +130,8 @@
       </aside>
 
       <div id="join-requests" class="join-requests"></div>
+      <div id="reaction-feed" class="reaction-feed"></div>
+      <canvas id="confetti" class="confetti" hidden></canvas>
 
       <div id="board-tools" class="board-tools">
         <button id="pen" class="tool" title="Pen: draw on the video">

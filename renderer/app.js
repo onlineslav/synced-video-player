@@ -14,6 +14,8 @@ import {StreamPlayer} from './player.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
+import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
+import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
   BRUSH_SIZES,
@@ -106,6 +108,9 @@ const ui = {
   friendList: $('friend-list'),
   friendsEmpty: $('friends-empty'),
   joinRequests: $('join-requests'),
+  reactions: $('reactions'),
+  reactionFeed: $('reaction-feed'),
+  confetti: $('confetti'),
   create: $('create'),
   joinForm: $('join-form'),
   joinCode: $('join-code'),
@@ -159,6 +164,7 @@ const blankSession = () => ({
   profileAction: null,
   boardAction: null,
   board: createBoard(),
+  reactAction: null,
   role: 'idle', // 'idle' | 'host' | 'viewer'
   hostId: null,
   claimedAt: 0,
@@ -194,7 +200,9 @@ async function enterRoom(code) {
     cuesAction: room.makeAction('cues', {kind: 'request'}),
     profileAction: room.makeAction('profile'),
     boardAction: room.makeAction('board'),
+    reactAction: room.makeAction('react'),
   }
+  session.reactAction.onMessage = (message, {peerId}) => receiveReaction(message?.kind, peerId)
   session.cuesAction.onRequest = ({id}) => hostCues(id)
   session.boardAction.onMessage = (message, {peerId}) => receiveBoard(message, peerId)
   session.profileAction.onMessage = (profile, {peerId}) => {
@@ -259,6 +267,7 @@ async function leaveRoom() {
   unpublishStream()
   ui.remoteVideo.srcObject = null
   ui.joinRequests.replaceChildren()
+  ui.reactionFeed.replaceChildren()
   session = blankSession()
   setRole('idle')
   ui.room.hidden = true
@@ -889,6 +898,80 @@ function renderTools() {
   for (const size of ui.sizes.children) size.classList.toggle('active', Number(size.dataset.size) === tools.size)
 }
 
+// ---------- Reactions ----------
+// Air horn, golf clap, quack and confetti: everyone in the room sees who sent one and hears it.
+
+const REACTION_SHOWN_MS = 2600
+const allowReaction = createRateLimiter()
+let audio = null
+let confetti = []
+let confettiFrame = null
+let confettiTime = 0
+
+function react(kind) {
+  if (!session.room || !REACTIONS[kind] || !allowReaction(selfId, performance.now())) return
+  session.reactAction.send({kind}).catch(() => {})
+  showReaction(kind, myName)
+}
+
+function receiveReaction(kind, peerId) {
+  if (!REACTIONS[kind] || !session.peers.has(peerId) || !allowReaction(peerId, performance.now())) return
+  showReaction(kind, person(peerId).name || 'Someone')
+}
+
+function showReaction(kind, name) {
+  const {emoji, label} = REACTIONS[kind]
+  const bubble = element('div', 'reaction-bubble')
+  bubble.title = label
+  bubble.append(element('span', 'reaction-emoji', emoji), element('span', null, name))
+  ui.reactionFeed.append(bubble)
+  setTimeout(() => bubble.remove(), REACTION_SHOWN_MS)
+  playReaction(kind)
+  if (kind === 'confetti') startConfetti()
+}
+
+// Reactions follow the app's volume, so muting silences them too.
+function playReaction(kind) {
+  const volume = Number(ui.volume.value)
+  if (!volume) return
+  try {
+    audio ??= new AudioContext()
+    audio.resume().catch(() => {})
+    const gain = audio.createGain()
+    gain.gain.value = volume
+    gain.connect(audio.destination)
+    playReactionSound(audio, gain, kind)
+    setTimeout(() => gain.disconnect(), 3000)
+  } catch {}
+}
+
+function startConfetti() {
+  const dpr = window.devicePixelRatio || 1
+  Object.assign(ui.confetti, {width: Math.round(innerWidth * dpr), height: Math.round(innerHeight * dpr)})
+  confetti.push(...launchConfetti(innerWidth, innerHeight))
+  ui.confetti.hidden = false
+  if (confettiFrame != null) return
+  confettiTime = performance.now()
+  confettiFrame = requestAnimationFrame(animateConfetti)
+}
+
+function animateConfetti(now) {
+  const dt = Math.min(0.05, Math.max(0, now - confettiTime) / 1000)
+  confettiTime = now
+  confetti = stepConfetti(confetti, dt, innerHeight)
+  const ctx = ui.confetti.getContext('2d')
+  const dpr = window.devicePixelRatio || 1
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, innerWidth, innerHeight)
+  drawConfetti(ctx, confetti)
+  if (confetti.length) {
+    confettiFrame = requestAnimationFrame(animateConfetti)
+  } else {
+    confettiFrame = null
+    ui.confetti.hidden = true
+  }
+}
+
 // ---------- Subtitles ----------
 // Text subtitles are drawn by each person's own app, so everyone picks their own track (or none).
 // Image subtitles (PGS, VobSub) can only be burned into the stream, so they show for everyone.
@@ -1287,8 +1370,20 @@ document.addEventListener('keydown', (event) => {
     toggleFullscreen()
   } else if (event.code === 'KeyM') {
     setVolume(Number(ui.volume.value) > 0 ? 0 : 1)
+  } else {
+    const kind = Object.keys(REACTIONS).find((k) => REACTIONS[k].key === event.code || REACTIONS[k].key === `Digit${event.key}`)
+    if (kind && !event.repeat) react(kind)
   }
 })
+
+for (const [kind, {emoji, label, key}] of Object.entries(REACTIONS)) {
+  const button = element('button', 'reaction', emoji)
+  button.dataset.reaction = kind
+  button.title = `${label} (${key.replace('Digit', '')})`
+  button.setAttribute('aria-label', label)
+  button.addEventListener('click', () => react(kind))
+  ui.reactions.append(button)
+}
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
 let chromeTimer = null

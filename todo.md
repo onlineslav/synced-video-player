@@ -14,11 +14,11 @@
 ## Room
 
 - [x] Show ping and connection telemetry beside each person's name
-- [ ] Reactions
-  - [ ] Air horn
-  - [ ] Golf clap
-  - [ ] Quack
-  - [ ] Confetti overlay across the screen
+- [x] Reactions
+  - [x] Air horn
+  - [x] Golf clap
+  - [x] Quack
+  - [x] Confetti overlay across the screen
 - [x] Communal whiteboard
   - [x] Shared board everyone in the room draws on
   - [x] Toggle to show or hide it for yourself
