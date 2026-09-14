@@ -2,6 +2,7 @@ const path = require('node:path')
 const {app, BrowserWindow, dialog, ipcMain} = require('electron')
 const media = require('./media')
 const {loadIceServers} = require('./turn')
+const updater = require('./updater')
 const IMAGES = require('../shared/images.json')
 
 const MEDIA_EXTENSIONS = [
@@ -61,6 +62,9 @@ function registerIpc() {
     win.setAlwaysOnTop(Boolean(pinned), 'floating')
     return win.isAlwaysOnTop()
   })
+  ipcMain.on('app:in-room', (_event, inRoom) => updater.setInRoom(inRoom))
+  ipcMain.handle('update:check', () => updater.checkMacUpdate())
+  ipcMain.handle('update:open', (_event, which) => updater.openMacUpdate(which))
 }
 
 function start() {
@@ -68,6 +72,7 @@ function start() {
     registerIpc()
     createWindow()
     media.detectCapabilities() // warm up so the first transcode starts instantly
+    updater.checkForUpdates()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

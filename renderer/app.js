@@ -325,6 +325,7 @@ async function enterRoom(code) {
     render()
   }
 
+  window.api.setInRoom(true)
   ui.code.textContent = formatRoomCode(code)
   ui.home.hidden = ui.settings.hidden = true
   ui.room.hidden = false
@@ -351,6 +352,7 @@ async function leaveRoom() {
   setFriendsOpen(false)
   renderFriends()
   await room?.leave()
+  window.api.setInRoom(false) // a downloaded update installs now
 }
 
 function setRole(role) {
@@ -661,7 +663,8 @@ function viewerTime() {
 
 // ---------- Profile ----------
 
-let myName = 'Me'
+const DEFAULT_NAME = 'Karlie Chirp' // the display name when the welcome screen's name is left empty
+let myName = DEFAULT_NAME
 let identity = null // {username, publicKey, privateKey}
 const myProfile = () => ({name: myName, username: identity?.username || null, status: myStatus()})
 
@@ -758,7 +761,7 @@ async function updateWelcome() {
   const current = welcome
   const handle = normalizeHandle(ui.handle.value)
   const typed = ui.handle.value.trim() !== ''
-  ui.welcomeSubmit.disabled = !(current && handle && cleanDisplayName(ui.welcomeName.value))
+  ui.welcomeSubmit.disabled = !(current && handle)
   ui.handleHint.textContent = typed && !handle ? `Usernames are ${HANDLE_HINT}` : 'The tag after # is added for you, so the username is yours alone.'
   ui.handleHint.classList.toggle('invalid', typed && !handle)
   const username = current && handle ? await usernameFor(current.keys.publicKey, handle) : null
@@ -1764,6 +1767,26 @@ Promise.all([loadIdentity(), window.api.iceServers().catch(() => [])]).then(
   },
 )
 
+// Mac can't install updates itself, so home shows a card when a newer release is out.
+window.api.checkForUpdate().then((update) => {
+  if (!update) return
+  const card = element('div', 'join-request')
+  const label = element('span', null, `Version ${update.version} is out`)
+  const download = element('button', 'primary small', 'Download')
+  const steps = element('button', 'small', 'Install steps')
+  const close = element('button', 'ghost small', 'Not now')
+  download.addEventListener('click', () => {
+    window.api.openUpdate('download')
+    label.textContent = 'Open the download and drag the app into Applications'
+    download.replaceWith(steps)
+    close.textContent = 'Done'
+  })
+  steps.addEventListener('click', () => window.api.openUpdate('page'))
+  close.addEventListener('click', () => card.remove())
+  card.append(label, download, close)
+  ui.homeInvites.append(card)
+}, () => {})
+
 ui.handle.addEventListener('input', updateWelcome)
 ui.welcomeName.addEventListener('input', updateWelcome)
 ui.welcomeCancel.addEventListener('click', () => {
@@ -1775,9 +1798,9 @@ ui.welcomeCancel.addEventListener('click', () => {
 ui.welcomeForm.addEventListener('submit', async (event) => {
   event.preventDefault()
   const handle = normalizeHandle(ui.handle.value)
-  const name = cleanDisplayName(ui.welcomeName.value)
+  const name = cleanDisplayName(ui.welcomeName.value) || DEFAULT_NAME
   const current = welcome
-  if (!current || !handle || !name) return
+  if (!current || !handle) return
   ui.welcomeSubmit.disabled = true
   const next = saveIdentity(await createIdentity(handle, current.keys))
   myName = name

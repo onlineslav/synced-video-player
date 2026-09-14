@@ -43,6 +43,8 @@ jobs:
           name: ${{ matrix.artifact }}
           path: |
             dist/*.exe
+            dist/*.exe.blockmap
+            dist/latest.yml
             dist/*.dmg
           if-no-files-found: error
 
