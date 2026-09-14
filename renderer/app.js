@@ -28,7 +28,6 @@ const VIDEO_MAX_BITRATE = 10_000_000
 const AUDIO_MAX_BITRATE = 256_000
 const MAX_STREAM_WIDTH = 1920
 const TELEMETRY_INTERVAL_MS = 2000
-const POOR_LINK_TOAST_EVERY_MS = 60_000
 const SUBTITLE_FILE = /\.(srt|ass|ssa|vtt)$/i
 const LOAD_SUBTITLE = '__load__'
 
@@ -73,6 +72,8 @@ const ui = {
   code: $('code'),
   peerStatus: $('peer-status'),
   link: $('link'),
+  linkWarning: $('link-warning'),
+  linkWarningTip: $('link-warning-tip'),
   title: $('title'),
   role: $('role'),
   openButtons: document.querySelectorAll('[data-open-video]'),
@@ -114,7 +115,6 @@ const blankSession = () => ({
   link: null, // {rttMs, relayed, sender, receiver} for the connection badge
   lastInbound: null,
   buffer: {bufferMs: MIN_BUFFER_MS, calmMs: 0},
-  lastPoorToast: 0,
   epoch: 0, // host: bumps whenever ffmpeg restarts, so viewers can tell a restart from a freeze
   steady: {since: null, epoch: 0}, // viewer: when the host's playback last became uninterrupted
 })
@@ -170,7 +170,7 @@ async function enterRoom(code) {
   session.telemetryAction.onMessage = (receiver) => {
     if (session.role !== 'host') return
     session.link = {...session.link, receiver}
-    noteLinkHealth()
+    render()
   }
 
   ui.code.textContent = formatRoomCode(code)
@@ -347,17 +347,6 @@ async function sampleConnection() {
   } else {
     session.link = base
   }
-  noteLinkHealth()
-}
-
-function noteLinkHealth() {
-  if (!session.link) return
-  const health = describeLink({selfRole: session.role, ...session.link})
-  const now = Date.now()
-  if (health.level === 'poor' && now - session.lastPoorToast > POOR_LINK_TOAST_EVERY_MS) {
-    session.lastPoorToast = now
-    toast(health.detail.split('\n')[0], true)
-  }
   render()
 }
 
@@ -470,6 +459,10 @@ function render() {
     ui.link.title = health.detail
     ui.link.dataset.level = health.level
   }
+  // Problems show as a faint caution sign on the video; hover it for the explanation.
+  const problem = health && health.level !== 'good'
+  ui.linkWarning.hidden = !problem
+  if (problem) ui.linkWarningTip.textContent = health.detail
   ui.title.textContent = host ? player.media?.title || player.media?.name || '' : r?.title || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
   ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: ''}[role]
