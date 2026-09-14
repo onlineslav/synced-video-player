@@ -11,6 +11,7 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {createIdentity, isValidIdentity, normalizeUsername} from './identity.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
   BRUSH_SIZES,
@@ -82,6 +83,10 @@ for (const method of ['createOffer', 'createAnswer', 'setLocalDescription']) {
 const $ = (id) => document.getElementById(id)
 const ui = {
   home: $('home'),
+  profileAvatar: $('profile-avatar'),
+  profileName: $('profile-name'),
+  username: $('username'),
+  newUsername: $('new-username'),
   create: $('create'),
   joinForm: $('join-form'),
   joinCode: $('join-code'),
@@ -176,6 +181,7 @@ async function enterRoom(code) {
   session.profileAction.onMessage = (profile, {peerId}) => {
     if (!session.peers.has(peerId)) return
     person(peerId).name = String(profile?.name || '').slice(0, MAX_NAME_LENGTH) || null
+    person(peerId).username = normalizeUsername(profile?.username)
     render()
   }
 
@@ -467,14 +473,43 @@ function viewerTime() {
   return Math.min(r.time + elapsed, r.duration || Infinity)
 }
 
-// ---------- People ----------
+// ---------- Profile ----------
 
 const MAX_NAME_LENGTH = 40
 let myName = 'Me'
-const myProfile = () => ({name: myName})
+let identity = null // {username, publicKey, privateKey}
+const myProfile = () => ({name: myName, username: identity?.username || null})
+
+async function loadIdentity() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('identity'))
+    if (await isValidIdentity(stored)) return stored
+  } catch {}
+  return saveIdentity(await createIdentity())
+}
+
+function saveIdentity(next) {
+  try {
+    localStorage.setItem('identity', JSON.stringify(next))
+  } catch {}
+  return next
+}
+
+function renderProfile() {
+  ui.profileName.textContent = myName
+  ui.profileAvatar.textContent = myName.trim()[0]?.toUpperCase() || '?'
+  ui.username.textContent = identity?.username || '…'
+}
+
+function shareProfile() {
+  renderProfile()
+  session.profileAction?.send(myProfile()).catch(() => {})
+}
+
+// ---------- People ----------
 
 function person(peerId) {
-  if (!session.people.has(peerId)) session.people.set(peerId, {name: null, rttMs: null, relayed: false, receiver: null})
+  if (!session.people.has(peerId)) session.people.set(peerId, {name: null, username: null, rttMs: null, relayed: false, receiver: null})
   return session.people.get(peerId)
 }
 
@@ -488,25 +523,26 @@ function element(tag, className, text) {
 function renderPeople() {
   const host = isHost()
   const hostId = host ? selfId : session.hostId
-  const me = {id: selfId, self: true, name: myName, ...(host ? {sender: session.link?.sender} : {receiver: session.role === 'viewer' ? session.link?.receiver : null})}
+  const me = {id: selfId, self: true, name: myName, username: identity?.username, ...(host ? {sender: session.link?.sender} : {receiver: session.role === 'viewer' ? session.link?.receiver : null})}
   const others = [...session.peers].map((id) => {
     const p = person(id)
-    return {id, name: p.name, rttMs: p.rttMs, relayed: p.relayed, receiver: p.receiver, sender: id === hostId ? session.remote?.sender : null}
+    return {id, name: p.name, username: p.username, rttMs: p.rttMs, relayed: p.relayed, receiver: p.receiver, sender: id === hostId ? session.remote?.sender : null}
   })
   const rows = [me, ...others]
     .map((row) => ({...row, host: row.id === hostId, stats: describePeer(row)}))
     .sort((a, b) => b.host - a.host)
 
   ui.peopleCount.textContent = String(rows.length)
-  const signature = JSON.stringify(rows.map(({name, self, host, stats}) => [name, self, host, stats]))
+  const signature = JSON.stringify(rows.map(({name, username, self, host, stats}) => [name, username, self, host, stats]))
   if (ui.people.dataset.signature === signature) return
   ui.people.dataset.signature = signature
   ui.people.replaceChildren(
-    ...rows.map(({name, self, host, stats}) => {
+    ...rows.map(({name, username, self, host, stats}) => {
       const shownName = name || 'Joining…'
       const row = element('li', 'person')
       if (stats.level) row.dataset.level = stats.level
       const nameLine = element('div', 'person-name', shownName)
+      if (username) nameLine.title = `Username: ${username}`
       if (self) nameLine.append(element('span', 'person-tag', 'you'))
       const statsLine = element('div', 'person-stats', [host ? 'Hosting' : null, stats.text].filter(Boolean).join(' · ') || ' ')
       if (stats.detail) statsLine.title = stats.detail
@@ -870,7 +906,33 @@ try {
 
 window.api.userName().then((name) => {
   if (name) myName = name.slice(0, MAX_NAME_LENGTH)
-  session.profileAction?.send(myProfile()).catch(() => {})
+  shareProfile()
+})
+loadIdentity().then((loaded) => {
+  identity = loaded
+  shareProfile()
+})
+
+// Home has no toast, so buttons confirm by briefly changing their own text.
+function flashButton(button, text) {
+  const original = button.dataset.original ?? button.textContent
+  button.dataset.original = original
+  button.textContent = text
+  clearTimeout(Number(button.dataset.timer))
+  button.dataset.timer = String(setTimeout(() => (button.textContent = original), 1500))
+}
+
+ui.username.addEventListener('click', async () => {
+  if (!identity) return
+  const copied = await navigator.clipboard.writeText(identity.username).then(() => true, () => false)
+  flashButton(ui.username, copied ? 'Copied' : "Couldn't copy")
+})
+
+ui.newUsername.addEventListener('click', async () => {
+  if (!confirm('Make a new username? Friends who added you will have to add you again.')) return
+  identity = saveIdentity(await createIdentity())
+  delete ui.username.dataset.original
+  shareProfile()
 })
 
 for (const button of ui.openButtons) {
