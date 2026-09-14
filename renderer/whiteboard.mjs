@@ -5,8 +5,11 @@
 // the picture on every screen, whatever its size.
 
 export const COLORS = ['#ffffff', '#1a1a1a', '#ff4d4d', '#ff9f1c', '#ffe14d', '#3ddc84', '#4da3ff', '#c77dff']
+// An eraser stroke is a stroke in this "colour": it wipes out whatever was drawn under it before.
+export const ERASER = 'erase'
 // Line widths as a fraction of the picture's height.
 export const BRUSH_SIZES = [0.004, 0.008, 0.016, 0.032]
+const ERASER_SCALE = 3 // the eraser is wider than a pen of the same size
 const MAX_COORDINATES = 8000 // per stroke: 4000 points
 
 export const createBoard = () => ({strokes: new Map(), clearedAt: 0})
@@ -16,7 +19,7 @@ const isCoordinateList = (list) => Array.isArray(list) && list.length % 2 === 0 
 // Strokes arrive in chunks while someone draws. `offset` is the index of the chunk's first
 // coordinate, so a repeated chunk changes nothing. Returns the stroke, or null if rejected.
 export function addStrokeChunk(board, {id, color, size, at, offset = 0, points}) {
-  if (typeof id !== 'string' || !COLORS.includes(color) || !Number.isInteger(size) || !BRUSH_SIZES[size]) return null
+  if (typeof id !== 'string' || !(COLORS.includes(color) || color === ERASER) || !Number.isInteger(size) || !BRUSH_SIZES[size]) return null
   if (!(at > board.clearedAt) || !Number.isInteger(offset) || offset < 0 || offset % 2 || !isCoordinateList(points)) return null
   const existing = board.strokes.get(id)
   if (offset > (existing?.points.length ?? 0)) return null
@@ -59,8 +62,10 @@ export function drawStroke(ctx, stroke, rect, from = 0) {
   if (points.length - start < 2) return
   const x = (i) => rect.x + points[i] * rect.width
   const y = (i) => rect.y + points[i + 1] * rect.height
-  ctx.strokeStyle = stroke.color
-  ctx.lineWidth = Math.max(1, BRUSH_SIZES[stroke.size] * rect.height)
+  const erasing = stroke.color === ERASER
+  ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over'
+  ctx.strokeStyle = erasing ? '#000000' : stroke.color
+  ctx.lineWidth = Math.max(1, BRUSH_SIZES[stroke.size] * (erasing ? ERASER_SCALE : 1) * rect.height)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   ctx.beginPath()

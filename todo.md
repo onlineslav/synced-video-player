@@ -26,6 +26,7 @@
   - [x] Simple colour picker
   - [x] Brush size (4 settings)
   - [x] Clear board button
+  - [x] Eraser
 
 ## Friends and profiles
 

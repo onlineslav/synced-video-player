@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {addStrokeChunk, boardSnapshot, clearBoard, createBoard, drawStroke, mergeSnapshot, pictureRect} from '../renderer/whiteboard.mjs'
+import {addStrokeChunk, boardSnapshot, clearBoard, createBoard, drawStroke, ERASER, mergeSnapshot, pictureRect} from '../renderer/whiteboard.mjs'
 
 const chunk = (fields) => ({id: 'a', color: '#ffffff', size: 1, at: 100, offset: 0, points: [0.1, 0.1], ...fields})
 
@@ -21,6 +21,21 @@ test('addStrokeChunk rejects malformed input from peers', () => {
   assert.equal(addStrokeChunk(board, chunk({points: [0.1]})), null)
   assert.equal(addStrokeChunk(board, chunk({points: [0.1, 'x']})), null)
   assert.equal(board.strokes.size, 0)
+  assert.ok(addStrokeChunk(board, chunk({color: ERASER})), 'eraser strokes are allowed')
+})
+
+test('eraser strokes cut out what is under them and pen strokes draw normally again', () => {
+  const calls = []
+  const ctx = new Proxy({}, {get: (_t, name) => (...args) => calls.push([name, ...args]), set: (_t, name, value) => calls.push([name, value])})
+  const rect = {x: 0, y: 0, width: 100, height: 100}
+  drawStroke(ctx, {color: ERASER, size: 0, points: [0, 0, 1, 1]}, rect)
+  drawStroke(ctx, {color: '#ffffff', size: 0, points: [0, 0, 1, 1]}, rect)
+  assert.deepEqual(calls.filter(([name]) => ['globalCompositeOperation', 'lineWidth'].includes(name)), [
+    ['globalCompositeOperation', 'destination-out'],
+    ['lineWidth', 1.2],
+    ['globalCompositeOperation', 'source-over'],
+    ['lineWidth', 1],
+  ])
 })
 
 test('clearing removes strokes started before it, including ones still being drawn', () => {

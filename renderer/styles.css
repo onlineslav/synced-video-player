@@ -420,6 +420,47 @@ button:disabled {
   letter-spacing: 0.04em;
 }
 
+.settings-button {
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.settings-card {
+  text-align: left;
+}
+
+.settings-card h1 {
+  text-align: center;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.settings-section h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.settings-section .hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .link-button {
   padding: 0;
   border: 0;

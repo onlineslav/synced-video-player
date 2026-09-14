@@ -25,6 +25,7 @@ import {
   clearBoard,
   createBoard,
   drawStroke,
+  ERASER,
   mergeSnapshot,
   pictureRect,
 } from './whiteboard.mjs'
@@ -101,6 +102,10 @@ const ui = {
   profileName: $('profile-name'),
   username: $('username'),
   newUsername: $('new-username'),
+  openSettings: $('open-settings'),
+  settings: $('settings'),
+  settingsUsername: $('settings-username'),
+  settingsBack: $('settings-back'),
   addFriend: $('add-friend'),
   friendUsername: $('friend-username'),
   friendError: $('friend-error'),
@@ -131,6 +136,7 @@ const ui = {
   swatches: $('swatches'),
   sizes: $('sizes'),
   boardClear: $('board-clear'),
+  eraser: $('eraser'),
   openButtons: document.querySelectorAll('[data-open-video]'),
   leave: $('leave'),
   stage: $('stage'),
@@ -256,7 +262,7 @@ async function enterRoom(code) {
   }
 
   ui.code.textContent = formatRoomCode(code)
-  ui.home.hidden = true
+  ui.home.hidden = ui.settings.hidden = true
   ui.room.hidden = false
   setRole('idle')
 }
@@ -541,7 +547,7 @@ function saveIdentity(next) {
 function renderProfile() {
   if (document.activeElement !== ui.profileName) ui.profileName.value = myName
   ui.profileAvatar.textContent = myName.trim()[0]?.toUpperCase() || '?'
-  ui.username.textContent = identity?.username || '…'
+  ui.username.textContent = ui.settingsUsername.textContent = identity?.username || '…'
 }
 
 // The display name is what people see; the username stays the same when it changes.
@@ -576,8 +582,8 @@ function shareProfile() {
 }
 
 // ---------- Welcome ----------
-// The first screen on a new install: pick a username and a display name. "Change" on the home
-// screen comes back here to pick a new username.
+// The first screen on a new install: pick a username and a display name. After that the username
+// can only be changed from Settings, which comes back here.
 
 let welcome = null // {mode: 'first' | 'change', keys} while the screen is open
 
@@ -591,7 +597,7 @@ async function showWelcome(mode) {
   ui.handle.value = changing ? identity.handle : ''
   ui.welcomeName.value = changing ? myName : ''
   ui.welcomeCancel.hidden = !changing
-  ui.home.hidden = true
+  ui.home.hidden = ui.settings.hidden = true
   ui.welcome.hidden = false
   ui.handle.focus()
   updateWelcome()
@@ -613,7 +619,9 @@ function finishWelcome(next, mode) {
   identity = next
   welcome = null
   ui.welcome.hidden = true
-  ui.home.hidden = false
+  // A changed username goes back to Settings, where it was changed from.
+  ui.home.hidden = mode === 'change'
+  ui.settings.hidden = mode !== 'change'
   delete ui.username.dataset.original
   if (mode === 'change') friendNetwork.restart(identity)
   else friendNetwork.start(identity, myProfile())
@@ -801,7 +809,7 @@ function setPeopleOpen(open) {
 // Everyone in the room draws on one board over the video. Showing it is a personal choice; the
 // strokes keep arriving either way.
 
-const tools = {pen: true, color: COLORS[0], size: 1}
+const tools = {tool: 'pen', color: COLORS[0], size: 1} // tool: 'pen', 'eraser' or null
 let drawing = null // {stroke, sent} while this person is drawing
 let strokeCount = 0
 let boardLayout = null // what the canvas was last fully drawn for
@@ -890,8 +898,9 @@ function setBoardOpen(open) {
 }
 
 function renderTools() {
-  ui.room.classList.toggle('pen', tools.pen && boardOpen())
-  ui.pen.classList.toggle('active', tools.pen)
+  ui.room.classList.toggle('pen', Boolean(tools.tool) && boardOpen())
+  ui.pen.classList.toggle('active', tools.tool === 'pen')
+  ui.eraser.classList.toggle('active', tools.tool === 'eraser')
   for (const swatch of ui.swatches.children) swatch.classList.toggle('active', swatch.dataset.color === tools.color)
   for (const size of ui.sizes.children) size.classList.toggle('active', Number(size.dataset.size) === tools.size)
 }
@@ -1158,17 +1167,19 @@ ui.code.addEventListener('click', async () => {
 ui.leave.addEventListener('click', leaveRoom)
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
-ui.pen.addEventListener('click', () => {
-  tools.pen = !tools.pen
-  renderTools()
-})
+for (const [button, tool] of [[ui.pen, 'pen'], [ui.eraser, 'eraser']]) {
+  button.addEventListener('click', () => {
+    tools.tool = tools.tool === tool ? null : tool
+    renderTools()
+  })
+}
 for (const color of COLORS) {
   const swatch = element('button', 'swatch')
   swatch.dataset.color = color
   swatch.style.background = color
   swatch.title = 'Pen colour'
   swatch.addEventListener('click', () => {
-    Object.assign(tools, {color, pen: true})
+    Object.assign(tools, {color, tool: 'pen'})
     renderTools()
   })
   ui.swatches.append(swatch)
@@ -1181,7 +1192,8 @@ BRUSH_SIZES.forEach((_, size) => {
   dot.style.width = dot.style.height = `${[4, 7, 11, 16][size]}px`
   button.append(dot)
   button.addEventListener('click', () => {
-    Object.assign(tools, {size, pen: true})
+    // Sizes apply to the eraser too, so picking one keeps it selected.
+    Object.assign(tools, {size, tool: tools.tool || 'pen'})
     renderTools()
   })
   ui.sizes.append(button)
@@ -1190,10 +1202,11 @@ ui.boardClear.addEventListener('click', clearBoardForEveryone)
 renderTools()
 
 ui.board.addEventListener('pointerdown', (event) => {
-  if (!tools.pen || event.button !== 0 || !session.room) return
+  if (!tools.tool || event.button !== 0 || !session.room) return
   ui.board.setPointerCapture(event.pointerId)
   const id = `${selfId}:${Date.now().toString(36)}:${strokeCount++}`
-  const stroke = addStrokeChunk(session.board, {id, color: tools.color, size: tools.size, at: Date.now(), points: boardPoints(event).slice(0, 2)})
+  const color = tools.tool === 'eraser' ? ERASER : tools.color
+  const stroke = addStrokeChunk(session.board, {id, color, size: tools.size, at: Date.now(), points: boardPoints(event).slice(0, 2)})
   drawing = stroke && {stroke, sent: 0}
   if (stroke) drawStroke(boardContext(), stroke, currentPictureRect())
 })
@@ -1237,7 +1250,7 @@ ui.welcomeName.addEventListener('input', updateWelcome)
 ui.welcomeCancel.addEventListener('click', () => {
   welcome = null
   ui.welcome.hidden = true
-  ui.home.hidden = false
+  ui.settings.hidden = false
 })
 ui.welcomeForm.addEventListener('submit', async (event) => {
   event.preventDefault()
@@ -1282,6 +1295,13 @@ ui.username.addEventListener('click', async () => {
   flashButton(ui.username, copied ? 'Copied' : "Couldn't copy")
 })
 
+function showSettings(open) {
+  ui.settings.hidden = !open
+  ui.home.hidden = open
+}
+
+ui.openSettings.addEventListener('click', () => showSettings(true))
+ui.settingsBack.addEventListener('click', () => showSettings(false))
 ui.newUsername.addEventListener('click', () => showWelcome('change'))
 
 for (const button of ui.openButtons) {
