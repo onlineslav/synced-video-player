@@ -30,6 +30,7 @@ const MAX_STREAM_WIDTH = 1920
 const TELEMETRY_INTERVAL_MS = 2000
 const SUBTITLE_FILE = /\.(srt|ass|ssa|vtt)$/i
 const LOAD_SUBTITLE = '__load__'
+const CHROME_IDLE_MS = 2500
 
 // The host's encoder follows hints in the viewer's SDP; both sides run this app.
 const setRemoteDescription = RTCPeerConnection.prototype.setRemoteDescription
@@ -429,7 +430,7 @@ const togglePlay = () => control(isPlaying() ? 'pause' : 'play')
 
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen()
-  else ui.stage.requestFullscreen().catch(() => {})
+  else ui.room.requestFullscreen().catch(() => {})
 }
 
 function fillSelect(select, options, selected) {
@@ -488,7 +489,8 @@ function render() {
   fillSelect(ui.subtitles, subtitles, state?.subtitleSelected ?? '')
   ui.subtitles.hidden = subtitles.length <= 1
 
-  if (!isPlaying()) ui.stage.classList.remove('mouse-idle')
+  if (!isPlaying()) ui.room.classList.remove('idle')
+  else if (!chromeTimer && !ui.room.classList.contains('idle')) wakeChrome()
 }
 
 let toastTimer = null
@@ -597,13 +599,22 @@ document.addEventListener('keydown', (event) => {
   }
 })
 
-let mouseIdleTimer = null
-ui.stage.addEventListener('mousemove', () => {
-  ui.stage.classList.remove('mouse-idle')
-  clearTimeout(mouseIdleTimer)
-  mouseIdleTimer = setTimeout(() => {
-    if (isPlaying()) ui.stage.classList.add('mouse-idle')
-  }, 2500)
+// While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
+let chromeTimer = null
+const chromeInUse = () => Boolean(ui.room.querySelector('.topbar:hover, .controls:hover, select:focus'))
+function wakeChrome() {
+  ui.room.classList.remove('idle')
+  clearTimeout(chromeTimer)
+  chromeTimer = setTimeout(() => {
+    chromeTimer = null
+    if (!isPlaying()) return
+    if (chromeInUse()) wakeChrome()
+    else ui.room.classList.add('idle')
+  }, CHROME_IDLE_MS)
+}
+ui.room.addEventListener('mousemove', wakeChrome)
+document.documentElement.addEventListener('mouseleave', () => {
+  if (isPlaying() && !chromeInUse()) ui.room.classList.add('idle')
 })
 
 // Keep Electron from navigating to files dropped outside the stage.
