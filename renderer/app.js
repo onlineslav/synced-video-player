@@ -148,6 +148,7 @@ const ui = {
   toast: $('toast'),
   controls: $('controls'),
   play: $('play'),
+  loop: $('loop'),
   time: $('time'),
   seek: $('seek'),
   duration: $('duration'),
@@ -174,6 +175,7 @@ const blankSession = () => ({
   role: 'idle', // 'idle' | 'host' | 'viewer'
   hostId: null,
   claimedAt: 0,
+  loop: false, // shared: the host restarts the video when it ends, and whoever hosts next keeps it
   remote: null, // latest host state, for viewers
   stream: null, // outgoing stream, for the host
   captured: null, // video.captureStream() backing it
@@ -380,6 +382,7 @@ function hostState() {
     buffering: !video.paused && video.readyState < 3,
     time: video.currentTime,
     duration: player.duration,
+    loop: session.loop,
     transcoding: player.transcoding,
     audio: (media?.audio || []).map((a) => ({value: String(a.index), label: a.label})),
     audioSelected: player.audioIndex == null ? '' : String(player.audioIndex),
@@ -461,7 +464,8 @@ function broadcastState(target) {
 function applyCommand(cmd, value) {
   if (!player.loaded) return
   const video = ui.localVideo
-  if (cmd === 'play') video.play().catch(() => {})
+  if (cmd === 'loop') session.loop = Boolean(value)
+  else if (cmd === 'play') video.play().catch(() => {})
   else if (cmd === 'pause') video.pause()
   else if (cmd === 'seek') player.seek(Number(value))
   else if (cmd === 'audio') player.setAudio(value === '' ? null : Number(value))
@@ -483,6 +487,7 @@ function receiveState(state, peerId) {
   const now = performance.now()
   session.steady = nextSteady(session.steady, state, session.remote ? viewerTime() : state.time, now)
   session.hostId = state.hostId
+  session.loop = Boolean(state.loop)
   session.remote = {...state, receivedAt: now}
   for (const [id, receiver] of Object.entries(state.viewers || {})) {
     if (session.peers.has(id)) person(id).receiver = receiver
@@ -1058,12 +1063,14 @@ function control(cmd, value) {
   const now = performance.now()
   if (cmd === 'play' || cmd === 'pause') Object.assign(r, {time: viewerTime(), playing: cmd === 'play', receivedAt: now})
   else if (cmd === 'seek') Object.assign(r, {time: Number(value), receivedAt: now})
+  else if (cmd === 'loop') session.loop = Boolean(value)
   else if (cmd === 'audio') r.audioSelected = value
   else if (cmd === 'subtitle') r.subtitleSelected = value
   render()
 }
 
 const togglePlay = () => control(isPlaying() ? 'pause' : 'play')
+const toggleLoop = () => control('loop', !session.loop)
 
 function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen()
@@ -1116,6 +1123,8 @@ function render() {
 
   ui.controls.classList.toggle('disabled', !ready)
   ui.play.dataset.state = isPlaying() ? 'playing' : 'paused'
+  ui.loop.classList.toggle('active', session.loop)
+  ui.loop.setAttribute('aria-pressed', String(session.loop))
   ui.time.textContent = formatTime(time)
   ui.duration.textContent = formatTime(duration)
   if (!session.seeking) ui.seek.value = duration ? String(Math.round((time / duration) * 1000)) : '0'
@@ -1312,6 +1321,7 @@ for (const button of ui.openButtons) {
 }
 
 ui.play.addEventListener('click', togglePlay)
+ui.loop.addEventListener('click', toggleLoop)
 ui.localVideo.addEventListener('click', togglePlay)
 ui.remoteVideo.addEventListener('click', togglePlay)
 ui.stage.addEventListener('dblclick', (event) => {
@@ -1361,6 +1371,12 @@ try {
 for (const type of ['play', 'pause', 'seeked', 'waiting', 'playing']) {
   ui.localVideo.addEventListener(type, () => broadcastState())
 }
+// Seeking back to the start works whether it's still buffered (a short clip) or ffmpeg has to restart.
+ui.localVideo.addEventListener('ended', () => {
+  if (!isHost() || !session.loop) return
+  player.seek(0)
+  ui.localVideo.play().catch(() => {})
+})
 // A new MediaSource means new tracks, so the captured stream has to be republished.
 ui.localVideo.addEventListener('loadedmetadata', () => {
   if (isHost()) publishStream()
@@ -1383,6 +1399,8 @@ document.addEventListener('keydown', (event) => {
   } else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
     event.preventDefault()
     control('seek', currentTime() + (event.code === 'ArrowLeft' ? -10 : 10))
+  } else if (event.code === 'KeyL') {
+    toggleLoop()
   } else if (event.code === 'KeyF') {
     toggleFullscreen()
   } else if (event.code === 'KeyM') {

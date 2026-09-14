@@ -1189,6 +1189,15 @@ button:disabled {
   display: block;
 }
 
+#loop svg {
+  opacity: 0.55;
+}
+
+#loop.active svg {
+  opacity: 1;
+  fill: var(--accent);
+}
+
 #play[data-state='playing'] .icon-play,
 #play[data-state='paused'] .icon-pause {
   display: none;
