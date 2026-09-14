@@ -13,6 +13,17 @@ import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
+  BRUSH_SIZES,
+  COLORS,
+  addStrokeChunk,
+  boardSnapshot,
+  clearBoard,
+  createBoard,
+  drawStroke,
+  mergeSnapshot,
+  pictureRect,
+} from './whiteboard.mjs'
+import {
   MIN_BUFFER_MS,
   adaptBuffer,
   describeLink,
@@ -85,6 +96,12 @@ const ui = {
   peopleToggle: $('people-toggle'),
   peopleCount: $('people-count'),
   people: $('people'),
+  boardToggle: $('board-toggle'),
+  board: $('board'),
+  pen: $('pen'),
+  swatches: $('swatches'),
+  sizes: $('sizes'),
+  boardClear: $('board-clear'),
   openButtons: document.querySelectorAll('[data-open-video]'),
   leave: $('leave'),
   stage: $('stage'),
@@ -116,6 +133,8 @@ const blankSession = () => ({
   peerStreams: new Map(),
   people: new Map(), // peerId -> {name, rttMs, relayed, receiver}
   profileAction: null,
+  boardAction: null,
+  board: createBoard(),
   role: 'idle', // 'idle' | 'host' | 'viewer'
   hostId: null,
   claimedAt: 0,
@@ -150,8 +169,10 @@ async function enterRoom(code) {
     telemetryAction: room.makeAction('telemetry'),
     cuesAction: room.makeAction('cues', {kind: 'request'}),
     profileAction: room.makeAction('profile'),
+    boardAction: room.makeAction('board'),
   }
   session.cuesAction.onRequest = ({id}) => hostCues(id)
+  session.boardAction.onMessage = (message, {peerId}) => receiveBoard(message, peerId)
   session.profileAction.onMessage = (profile, {peerId}) => {
     if (!session.peers.has(peerId)) return
     person(peerId).name = String(profile?.name || '').slice(0, MAX_NAME_LENGTH) || null
@@ -161,6 +182,7 @@ async function enterRoom(code) {
   room.onPeerJoin = (peerId) => {
     session.peers.add(peerId)
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
+    if (session.board.strokes.size) session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
     toast('Friend connected')
     if (session.role === 'host') {
       if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId})).then(tuneSenders, () => {})
@@ -503,6 +525,105 @@ function setPeopleOpen(open) {
   } catch {}
 }
 
+// ---------- Whiteboard ----------
+// Everyone in the room draws on one board over the video. Showing it is a personal choice; the
+// strokes keep arriving either way.
+
+const tools = {pen: true, color: COLORS[0], size: 1}
+let drawing = null // {stroke, sent} while this person is drawing
+let strokeCount = 0
+let boardLayout = null // what the canvas was last fully drawn for
+
+const boardOpen = () => ui.room.classList.contains('board-open')
+
+function currentPictureRect() {
+  const video = isHost() ? ui.localVideo : ui.remoteVideo
+  const playing = session.role !== 'idle'
+  return pictureRect(ui.stage.clientWidth, ui.stage.clientHeight, playing ? video.videoWidth : 0, playing ? video.videoHeight : 0)
+}
+
+function boardContext() {
+  const ctx = ui.board.getContext('2d')
+  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0)
+  return ctx
+}
+
+// Redraw everything when the window, the picture or the board itself changed since last time.
+function syncBoardLayout(force = false) {
+  const dpr = window.devicePixelRatio || 1
+  const width = Math.round(ui.stage.clientWidth * dpr)
+  const height = Math.round(ui.stage.clientHeight * dpr)
+  const rect = currentPictureRect()
+  const layout = {board: session.board, key: JSON.stringify([width, height, rect])}
+  if (!force && boardLayout?.board === layout.board && boardLayout.key === layout.key) return
+  boardLayout = layout
+  if (ui.board.width !== width || ui.board.height !== height) Object.assign(ui.board, {width, height})
+  const ctx = boardContext()
+  ctx.clearRect(0, 0, ui.stage.clientWidth, ui.stage.clientHeight)
+  for (const stroke of session.board.strokes.values()) drawStroke(ctx, stroke, rect)
+}
+
+function receiveBoard(message, peerId) {
+  if (message?.type === 'stroke') {
+    const stroke = addStrokeChunk(session.board, message)
+    if (!stroke) return
+    drawStroke(boardContext(), stroke, currentPictureRect(), message.offset)
+    if (!boardOpen()) ui.boardToggle.classList.add('activity')
+  } else if (message?.type === 'clear') {
+    clearBoard(session.board, message.at)
+    syncBoardLayout(true)
+    toast(`${person(peerId).name || 'Someone'} cleared the board`)
+  } else if (message?.type === 'sync') {
+    mergeSnapshot(session.board, message)
+    syncBoardLayout(true)
+  }
+}
+
+function boardPoints(event) {
+  const box = ui.stage.getBoundingClientRect()
+  const rect = currentPictureRect()
+  const events = event.getCoalescedEvents?.() || []
+  return (events.length ? events : [event]).flatMap((e) => [
+    Math.round(((e.clientX - box.left - rect.x) / rect.width) * 10000) / 10000,
+    Math.round(((e.clientY - box.top - rect.y) / rect.height) * 10000) / 10000,
+  ])
+}
+
+function sendStroke() {
+  if (!drawing || !session.boardAction) return
+  const {stroke, sent} = drawing
+  if (stroke.points.length <= sent) return
+  const {id, color, size, at} = stroke
+  session.boardAction.send({type: 'stroke', id, color, size, at, offset: sent, points: stroke.points.slice(sent)}).catch(() => {})
+  drawing.sent = stroke.points.length
+}
+
+function endStroke() {
+  sendStroke()
+  drawing = null
+}
+
+function clearBoardForEveryone() {
+  // Cover strokes stamped by a clock slightly ahead of ours, too.
+  const at = Math.max(Date.now(), ...[...session.board.strokes.values()].map((s) => s.at))
+  clearBoard(session.board, at)
+  session.boardAction?.send({type: 'clear', at}).catch(() => {})
+  syncBoardLayout(true)
+}
+
+function setBoardOpen(open) {
+  ui.room.classList.toggle('board-open', open)
+  if (open) ui.boardToggle.classList.remove('activity')
+  renderTools()
+}
+
+function renderTools() {
+  ui.room.classList.toggle('pen', tools.pen && boardOpen())
+  ui.pen.classList.toggle('active', tools.pen)
+  for (const swatch of ui.swatches.children) swatch.classList.toggle('active', swatch.dataset.color === tools.color)
+  for (const size of ui.sizes.children) size.classList.toggle('active', Number(size.dataset.size) === tools.size)
+}
+
 // ---------- Subtitles ----------
 // Text subtitles are drawn by each person's own app, so everyone picks their own track (or none).
 // Image subtitles (PGS, VobSub) can only be burned into the stream, so they show for everyone.
@@ -615,6 +736,7 @@ function render() {
   ui.peerStatus.textContent = peerCount ? 'Friend connected' : 'Waiting for your friend to join…'
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
   renderPeople()
+  syncBoardLayout()
   const health = peerCount && session.link ? describeLink({selfRole: role, ...session.link}) : null
   ui.link.hidden = !health
   if (health) {
@@ -687,6 +809,57 @@ ui.code.addEventListener('click', async () => {
 })
 
 ui.leave.addEventListener('click', leaveRoom)
+
+ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
+ui.pen.addEventListener('click', () => {
+  tools.pen = !tools.pen
+  renderTools()
+})
+for (const color of COLORS) {
+  const swatch = element('button', 'swatch')
+  swatch.dataset.color = color
+  swatch.style.background = color
+  swatch.title = 'Pen colour'
+  swatch.addEventListener('click', () => {
+    Object.assign(tools, {color, pen: true})
+    renderTools()
+  })
+  ui.swatches.append(swatch)
+}
+BRUSH_SIZES.forEach((_, size) => {
+  const button = element('button', 'size')
+  button.dataset.size = String(size)
+  button.title = ['Thin', 'Medium', 'Thick', 'Marker'][size]
+  const dot = element('span')
+  dot.style.width = dot.style.height = `${[4, 7, 11, 16][size]}px`
+  button.append(dot)
+  button.addEventListener('click', () => {
+    Object.assign(tools, {size, pen: true})
+    renderTools()
+  })
+  ui.sizes.append(button)
+})
+ui.boardClear.addEventListener('click', clearBoardForEveryone)
+renderTools()
+
+ui.board.addEventListener('pointerdown', (event) => {
+  if (!tools.pen || event.button !== 0 || !session.room) return
+  ui.board.setPointerCapture(event.pointerId)
+  const id = `${selfId}:${Date.now().toString(36)}:${strokeCount++}`
+  const stroke = addStrokeChunk(session.board, {id, color: tools.color, size: tools.size, at: Date.now(), points: boardPoints(event).slice(0, 2)})
+  drawing = stroke && {stroke, sent: 0}
+  if (stroke) drawStroke(boardContext(), stroke, currentPictureRect())
+})
+ui.board.addEventListener('pointermove', (event) => {
+  if (!drawing) return
+  const {stroke} = drawing
+  const from = stroke.points.length
+  if (!addStrokeChunk(session.board, {...stroke, offset: from, points: boardPoints(event)})) return (drawing = null)
+  drawStroke(boardContext(), stroke, currentPictureRect(), from)
+})
+ui.board.addEventListener('pointerup', endStroke)
+ui.board.addEventListener('pointercancel', endStroke)
+window.addEventListener('resize', () => syncBoardLayout())
 
 ui.peopleToggle.addEventListener('click', () => setPeopleOpen(!ui.room.classList.contains('people-open')))
 try {
@@ -788,7 +961,8 @@ document.addEventListener('keydown', (event) => {
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
 let chromeTimer = null
-const chromeInUse = () => Boolean(ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, select:focus'))
+const chromeInUse = () =>
+  Boolean(drawing || ui.room.querySelector('.topbar:hover, .controls:hover, .sidebar:hover, .board-tools:hover, select:focus'))
 function wakeChrome() {
   ui.room.classList.remove('idle')
   clearTimeout(chromeTimer)
@@ -824,6 +998,7 @@ window.addEventListener('beforeunload', () => session.room?.leave())
 
 setInterval(render, 250)
 requestAnimationFrame(drawCaptions)
+setInterval(sendStroke, 50)
 setInterval(() => sampleConnection().catch(() => {}), TELEMETRY_INTERVAL_MS)
 setInterval(() => {
   if (!isHost()) return
