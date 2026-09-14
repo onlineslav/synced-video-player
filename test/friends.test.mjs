@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {FriendNetwork, helloText, pairRoomId} from '../renderer/friends.mjs'
+import {FriendNetwork, helloText, pairRoomId, presenceText} from '../renderer/friends.mjs'
 import {createIdentity, sign, verifySigned} from '../renderer/identity.mjs'
 
 // Trystero in memory: everyone in a room id is connected to everyone else in it.
@@ -128,7 +128,37 @@ test('a peer claiming someone else’s username is ignored', async () => {
     profile.send({name: 'Totally Bob'}, {target: peerId})
   }
   await new Promise((resolve) => setTimeout(resolve, 100))
-  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false}])
+  assert.deepEqual(alice.friends.list(), [{username: bob.username, name: null, confirmed: false, requested: false, online: false, status: null}])
+})
+
+test('friends see each other online, in a room and hosting, and then offline', async () => {
+  const net = fakeTrystero()
+  const alice = await person(net, 'a', 'Alice')
+  const bob = await person(net, 'b', 'Bob')
+  alice.friends.add(bob.identity.username)
+  bob.friends.add(alice.identity.username)
+  await until(() => alice.friends.list()[0]?.online && bob.friends.list()[0]?.online, 'online')
+  assert.equal(presenceText(bob.friends.list()[0]), 'Online')
+
+  alice.friends.updateProfile({name: 'Alice', status: {inRoom: true}})
+  await until(() => bob.friends.list()[0].status?.inRoom, 'in a room')
+  assert.equal(presenceText(bob.friends.list()[0]), 'In a room')
+
+  const title = `Heat${String.fromCharCode(0)}   (1995)`
+  alice.friends.updateProfile({name: 'Alice', status: {inRoom: true, hosting: true, title}})
+  await until(() => bob.friends.list()[0].status?.hosting, 'hosting')
+  assert.equal(presenceText(bob.friends.list()[0]), 'Hosting Heat (1995)')
+
+  alice.friends.stop()
+  await until(() => !bob.friends.list()[0].online, 'offline')
+  assert.equal(bob.friends.list()[0].status, null)
+  assert.equal(presenceText(bob.friends.list()[0]), 'Offline')
+})
+
+test('presenceText explains friends who have not added you back yet', () => {
+  assert.equal(presenceText({confirmed: false, requested: true}), 'Waiting for them to add you back')
+  assert.equal(presenceText({confirmed: false, requested: false}), 'Request sends when they next open the app')
+  assert.equal(presenceText({confirmed: true, online: true, status: {hosting: true, title: null}}), 'Hosting a room')
 })
 
 test('add rejects bad input', async () => {

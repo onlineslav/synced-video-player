@@ -144,6 +144,45 @@ button.ghost {
   flex: 1;
 }
 
+.friend .avatar {
+  position: relative;
+  overflow: visible;
+}
+
+.friend[data-presence] .avatar::after {
+  content: '';
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: #5a5a66;
+}
+
+.friend[data-presence='online'] .avatar::after {
+  background: var(--ok);
+}
+
+.friend[data-presence='room'] .avatar::after,
+.friend[data-presence='hosting'] .avatar::after {
+  background: var(--accent);
+}
+
+.friend[data-presence='pending'] .avatar::after {
+  display: none;
+}
+
+.friend[data-presence='hosting'] .person-stats {
+  color: #b9b0ff;
+}
+
+.friend[data-presence='offline'] .avatar,
+.friend[data-presence='offline'] .person-main {
+  opacity: 0.55;
+}
+
 .friend-request {
   padding: 8px;
   border: 1px solid var(--accent);

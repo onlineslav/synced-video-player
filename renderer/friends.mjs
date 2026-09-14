@@ -3,9 +3,27 @@
 // peer says is believed until it proves its username with a signed hello, so usernames can't be
 // impersonated. `joinRoom` is Trystero's, injected so the protocol can be tested in memory.
 import {normalizeUsername, sign, verifySigned} from './identity.mjs'
-import {cleanDisplayName} from './profile.mjs'
+import {cleanDisplayName, cleanText} from './profile.mjs'
+
+const MAX_TITLE_LENGTH = 80
 
 export const inboxRoomId = (username) => `inbox:${username}`
+
+// What a friend says they're doing. Only kept while they're online.
+export const cleanStatus = (status) => ({
+  inRoom: Boolean(status?.inRoom),
+  hosting: Boolean(status?.hosting),
+  title: status?.hosting ? cleanText(status.title, MAX_TITLE_LENGTH) : null,
+})
+
+// The line under a friend's name.
+export function presenceText({confirmed, requested, online, status}) {
+  if (!confirmed) return requested ? 'Waiting for them to add you back' : 'Request sends when they next open the app'
+  if (!online) return 'Offline'
+  if (status?.hosting) return status.title ? `Hosting ${status.title}` : 'Hosting a room'
+  if (status?.inRoom) return 'In a room'
+  return 'Online'
+}
 export const pairRoomId = (a, b) => `pair:${[a, b].sort().join(':')}`
 // Binding the room and both peer ids stops a hello being replayed anywhere else.
 export const helloText = (roomId, fromPeer, toPeer) => `synced-video-player hello ${roomId} ${fromPeer} ${toPeer}`
@@ -23,6 +41,7 @@ export class FriendNetwork extends EventTarget {
     this.requests = new Map((storage.load('friendRequests') || []).map((r) => [r.username, r]))
     this.links = new Map() // roomId -> link
     this.online = new Map() // username -> {link, peerId}
+    this.presence = new Map() // username -> cleanStatus(), from their latest profile
   }
 
   start(identity, profile) {
@@ -45,7 +64,10 @@ export class FriendNetwork extends EventTarget {
   }
 
   list() {
-    return [...this.friends.values()].map((friend) => ({...friend, online: this.online.has(friend.username)}))
+    return [...this.friends.values()].map((friend) => {
+      const online = this.online.has(friend.username)
+      return {...friend, online, status: online ? this.presence.get(friend.username) || null : null}
+    })
   }
 
   requestList() {
@@ -69,7 +91,7 @@ export class FriendNetwork extends EventTarget {
 
   remove(username) {
     this.friends.delete(username)
-    this.online.delete(username)
+    this.goOffline(username)
     this.save()
     this.syncRooms()
     this.changed()
@@ -115,7 +137,7 @@ export class FriendNetwork extends EventTarget {
       // A peer has the same id in every room; only leaving the room you're friends through counts.
       const entry = this.online.get(username)
       if (entry?.link === link && entry.peerId === peerId) {
-        this.online.delete(username)
+        this.goOffline(username)
         this.changed()
       }
     }
@@ -138,6 +160,7 @@ export class FriendNetwork extends EventTarget {
       const friend = this.friends.get(username)
       if (link.kind !== 'pair' || username !== link.username || !friend) return
       friend.name = cleanDisplayName(profile?.name) ?? friend.name
+      this.presence.set(username, cleanStatus(profile?.status))
       this.save()
       this.changed()
     })
@@ -164,8 +187,13 @@ export class FriendNetwork extends EventTarget {
     const link = this.links.get(roomId)
     if (!link) return
     this.links.delete(roomId)
-    for (const [username, entry] of this.online) if (entry.link === link) this.online.delete(username)
+    for (const [username, entry] of this.online) if (entry.link === link) this.goOffline(username)
     link.room.leave()
+  }
+
+  goOffline(username) {
+    this.online.delete(username)
+    this.presence.delete(username)
   }
 
   async sendHello(link, peerId) {

@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {MAX_NAME_LENGTH, cleanDisplayName} from '../renderer/profile.mjs'
+import {MAX_NAME_LENGTH, cleanDisplayName, cleanText} from '../renderer/profile.mjs'
+
+test('cleanText caps at the given length', () => {
+  assert.equal(cleanText(' The   Long\tTitle ', 8), 'The Long')
+  assert.equal(cleanText(undefined, 8), null)
+})
 
 test('cleanDisplayName tidies what people type and what peers send', () => {
   assert.equal(cleanDisplayName('  Movie   Night\n'), 'Movie Night')

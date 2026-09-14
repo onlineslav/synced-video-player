@@ -34,5 +34,5 @@
 - [x] Changeable display name, separate from the username
 - [x] Add friends by username
 - [ ] Set or upload a profile photo
-- [ ] See which friends are online and hosting rooms
+- [x] See which friends are online and hosting rooms
 - [ ] Ask to join a friend's room

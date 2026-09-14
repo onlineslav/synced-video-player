@@ -11,7 +11,7 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
-import {FriendNetwork} from './friends.mjs'
+import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {MAX_NAME_LENGTH, cleanDisplayName} from './profile.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -495,7 +495,21 @@ function viewerTime() {
 
 let myName = 'Me'
 let identity = null // {username, publicKey, privateKey}
-const myProfile = () => ({name: myName, username: identity?.username || null})
+const myProfile = () => ({name: myName, username: identity?.username || null, status: myStatus()})
+
+// Friends see whether you're in a room, and what you're hosting.
+function myStatus() {
+  const hosting = session.role === 'host' && player.loaded
+  return {inRoom: Boolean(session.room), hosting, title: hosting ? player.media.title || player.media.name : null}
+}
+
+let sharedStatus = ''
+function syncPresence() {
+  const status = JSON.stringify(myStatus())
+  if (!friendNetwork.identity || status === sharedStatus) return
+  sharedStatus = status
+  friendNetwork.updateProfile(myProfile())
+}
 
 async function loadIdentity() {
   try {
@@ -615,15 +629,19 @@ const localStore = {
 
 const friendNetwork = new FriendNetwork({joinRoom, selfId, appId: APP_ID, storage: localStore})
 
-function friendStatus({confirmed, requested}) {
-  if (confirmed) return 'Friends'
-  if (requested) return 'Waiting for them to add you back'
-  return 'Request sends when they next open the app'
+const presenceOf = (friend) => {
+  if (!friend.confirmed) return 'pending'
+  if (!friend.online) return 'offline'
+  return friend.status?.hosting ? 'hosting' : friend.status?.inRoom ? 'room' : 'online'
 }
+const PRESENCE_ORDER = ['hosting', 'room', 'online', 'offline', 'pending']
 
 function renderFriends() {
   const requests = friendNetwork.requestList()
-  const friends = friendNetwork.list().sort((a, b) => b.confirmed - a.confirmed || (a.name || a.username).localeCompare(b.name || b.username))
+  const label = (friend) => friend.name || friend.username
+  const friends = friendNetwork
+    .list()
+    .sort((a, b) => PRESENCE_ORDER.indexOf(presenceOf(a)) - PRESENCE_ORDER.indexOf(presenceOf(b)) || label(a).localeCompare(label(b)))
 
   ui.friendRequests.replaceChildren(
     ...requests.map(({username, name}) => {
@@ -646,8 +664,9 @@ function renderFriends() {
     ...friends.map((friend) => {
       const label = friend.name || friend.username
       const row = element('li', 'friend')
+      row.dataset.presence = presenceOf(friend)
       const main = element('div', 'person-main')
-      main.append(element('div', 'person-name', label), element('div', 'person-stats', friendStatus(friend)))
+      main.append(element('div', 'person-name', label), element('div', 'person-stats', presenceText(friend)))
       main.firstChild.title = `Username: ${friend.username}`
       const remove = element('button', 'friend-remove', '×')
       remove.title = 'Remove friend'
@@ -936,6 +955,7 @@ function render() {
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
   renderPeople()
   syncBoardLayout()
+  syncPresence()
   const health = peerCount && session.link ? describeLink({selfRole: role, ...session.link}) : null
   ui.link.hidden = !health
   if (health) {
