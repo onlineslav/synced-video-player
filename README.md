@@ -15,7 +15,11 @@ Watch or listen to a media file together on Windows or Mac, with up to eight peo
 
 In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
 
-The playlist lives behind the tab on the right edge: click it, or drag it out to the width you like. Anyone can add files to it (or drop them on it), drag items to reorder them, and play any item. The file stays on the computer of whoever added it, and their app hosts it when it plays, so an item can't play once that person leaves. When a file ends, the next one starts (unless loop is on).
+The playlist lives behind the tab on the right edge: click it, or drag it out to the width you like. Anyone can add files, reorder them, and play available items. Opening or dropping media on the player also adds it to the room's playlist. Files stay on their owner's computer. When an owner leaves, their items remain greyed out as **Unavailable** and playback skips them. They become available again when the owner rejoins with the files still present. If the active host leaves during playback, a remaining participant advances to the next available item.
+
+Rooms stay under **Your rooms** on the home screen after everyone leaves or restarts the app. Reopen a room and choose **Resume** to continue from saved progress; each playlist item keeps its own position, including items you switched away from. Playlist order, removals, the current item, room name and loop state are saved too. A finished item starts from the beginning if you choose to replay it.
+
+Each participant saves a local copy and exchanges updates on reconnect. A person who left earlier receives later changes when someone with those changes rejoins. File paths stay local and are scoped to your identity and that room. Moving or deleting a file makes it unavailable; add its new location to share it again. All participants need a build with persistent-room support to meet in these rooms.
 
 Shortcuts: `Space` play/pause · `←`/`→` 10 seconds · `F` fullscreen · `M` mute · `P` playlist · `1`–`4` reactions.
 

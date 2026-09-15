@@ -60,6 +60,8 @@ async function fixtures() {
     window.__test = {
       get session() { return session }, get identity() { return identity },
       friendNetwork, enterRoom, leaveRoom, hostFile, control, receiveImage, shownImage, selectSubtitle,
+      addToPlaylist, playItem, playNext, playable, orderedItems, moveInPlaylist, removeFromPlaylist, refreshAvailability, setPlaylistOpen,
+      get history() { return roomHistory },
       audioState: () => ({running: audio?.state === 'running', connected: Boolean(remoteAudio)}),
       audioLevel: () => {
         if (!output || !audio) return 0;
@@ -229,6 +231,100 @@ app.whenReady().then(async () => {
     await Promise.all([a, b].map((win) => until(win, '__test.friendNetwork.online.size === 1')))
     for (const win of windows) assert.deepEqual(await run(win, '__test.errors'), [])
     console.log('PASS: Two leave/rejoin cycles retain friends and produce no renderer exceptions')
+
+    await Promise.all(windows.map((win) => run(win, '__test.leaveRoom()')))
+    await run(a, '__test.enterRoom("PERSIST1", {joining:false})')
+    await Promise.all([b, c].map((win) => run(win, '__test.enterRoom("PERSIST1")')))
+    await connected()
+    await run(a, `document.getElementById('room-name').value='Weekly movies'; document.getElementById('room-name-form').requestSubmit()`)
+    const playlistIds = []
+    for (const win of windows) {
+      playlistIds.push(await run(win, `__test.addToPlaylist([${JSON.stringify(video)}])[0].id`))
+      await Promise.all(windows.map((peer) => until(peer, `__test.session.playlist.items.size === ${playlistIds.length}`)))
+    }
+    await Promise.all(windows.map((win) => until(win, '[...__test.session.playlist.items.values()].every(__test.playable)')))
+    for (const [win, id, seconds] of [[a, playlistIds[0], 8], [b, playlistIds[1], 12]]) {
+      await run(win, `__test.playItem(${JSON.stringify(id)})`)
+      await until(win, 'document.getElementById("local-video").readyState >= 3')
+      await run(win, `__test.control('pause'); __test.control('seek', ${seconds})`)
+      await Promise.all(windows.map((peer) => until(peer, `Math.abs((__test.session.playlist.progress.get(${JSON.stringify(id)})?.time ?? -100) - ${seconds}) < 0.5`)))
+    }
+    await run(a, `__test.moveInPlaylist(${JSON.stringify(playlistIds[2])}, 0)`)
+    await Promise.all(windows.map((win) => until(win, `__test.orderedItems(__test.session.playlist)[0].id === ${JSON.stringify(playlistIds[2])}`)))
+    const oldPeerIds = await Promise.all(windows.map((win) => run(win, '__test.selfId')))
+    const staleRoom = await run(a, '__test.history.load("PERSIST1") && localStorage.getItem(__test.history.prefix + "PERSIST1")')
+    await Promise.all(windows.map((win) => run(win, '__test.leaveRoom()')))
+    await Promise.all(windows.map((win) => until(win, `Boolean(document.querySelector('.saved-room-open[data-code="PERSIST1"]'))`)))
+    // Reload every renderer: transport IDs change, local identity and saved room
+    // data must survive. No live peer remains to supply a forgotten playlist.
+    await Promise.all(windows.map((win) => win.loadFile(path.join(temporary, 'index.html'))))
+    await Promise.all(windows.map((win) => until(win, 'window.__test && __test.friendNetwork.identity && !document.getElementById("home").hidden')))
+    for (let i = 0; i < windows.length; i++) {
+      assert.notEqual(await run(windows[i], '__test.selfId'), oldPeerIds[i])
+      assert.equal(await run(windows[i], '__test.identity.username'), names[i])
+      assert.equal(await run(windows[i], '__test.history.load("PERSIST1").details.name'), 'Weekly movies')
+      assert.equal(await run(windows[i], '__test.history.load("PERSIST1").ownFiles.size'), 1)
+    }
+    await run(a, `document.querySelector('.saved-room-open[data-code="PERSIST1"]').click()`)
+    await until(a, '__test.session.code === "PERSIST1" && __test.session.availableFiles.size === 1')
+    assert.deepEqual(await run(a, '__test.orderedItems(__test.session.playlist).map(item => item.id)'), [playlistIds[2], playlistIds[0], playlistIds[1]])
+    assert.equal(await run(a, 'document.querySelectorAll(".playlist-item.missing").length'), 2)
+    assert.equal(await run(a, 'document.querySelectorAll(".playlist-item.missing .playlist-play:disabled").length'), 2)
+    assert.ok(await run(a, 'document.getElementById("playlist-items").textContent.includes("Unavailable")'))
+    await run(a, '__test.setPlaylistOpen(true); if (document.getElementById("room").classList.contains("people-open")) document.getElementById("people-toggle").click()')
+    await run(a, 'document.getAnimations().forEach(animation => animation.finish())')
+    assert.ok(await run(a, 'document.getElementById("playlist").getBoundingClientRect().width >= 220'))
+    assert.ok(Math.abs(await run(a, `__test.session.playlist.progress.get(${JSON.stringify(playlistIds[1])}).time`) - 12) < 0.5)
+    await run(a, 'document.getElementById("resume-room").click()')
+    await until(a, '__test.session.role === "host" && document.getElementById("local-video").currentTime >= 7.5 && document.getElementById("local-video").readyState >= 3')
+    await run(a, '__test.control("pause")')
+    console.log('PASS: All three copies retain room name, playlist order and per-item progress after everyone leaves and restarts; Resume skips offline owners')
+    await Promise.all([b, c].map((win) => run(win, `document.querySelector('.saved-room-open[data-code="PERSIST1"]').click()`)))
+    await connected()
+    await Promise.all(windows.map((win) => until(win, '[...__test.session.playlist.items.values()].every(__test.playable)')))
+    await run(a, `__test.moveInPlaylist(${JSON.stringify(playlistIds[2])}, 2)`)
+    await Promise.all(windows.map((win) => until(win, `__test.orderedItems(__test.session.playlist)[2].id === ${JSON.stringify(playlistIds[2])}`)))
+    await run(b, '__test.leaveRoom()')
+    await until(a, '__test.session.peers.size === 1 && document.querySelectorAll(".playlist-item.missing").length === 1')
+    await run(a, '__test.control("seek", 29); __test.control("play")')
+    await until(c, `__test.session.role === 'host' && __test.session.playing?.id === ${JSON.stringify(playlistIds[2])} && document.getElementById('local-video').readyState >= 3`)
+    console.log('PASS: Ending playback skips an offline owner’s item and starts the next available owner’s media')
+    await run(a, `__test.playItem(${JSON.stringify(playlistIds[0])})`)
+    await until(a, '__test.session.role === "host" && !document.getElementById("local-video").paused')
+    await until(c, '__test.session.role === "viewer" && __test.session.remote.playing')
+    await run(a, '__test.leaveRoom()')
+    await until(c, `__test.session.role === 'host' && __test.session.playing?.id === ${JSON.stringify(playlistIds[2])} && !__test.session.openingMedia && document.getElementById('local-video').readyState >= 3`)
+    console.log('PASS: When the active host leaves, remaining viewers skip unavailable items and continue with an available owner')
+    await run(c, '__test.control("pause"); __test.control("seek", 6)')
+    await until(c, 'Math.abs(document.getElementById("local-video").currentTime - 6) < 0.5')
+    await run(c, '__test.leaveRoom()')
+    // Reopen an older copy, start playback, then reunite it with a newer saved
+    // history. Subsequent playback must still issue winning progress updates.
+    await run(a, `localStorage.setItem(__test.history.prefix + 'PERSIST1', ${JSON.stringify(staleRoom)}); __test.enterRoom('PERSIST1')`)
+    await until(a, '__test.session.availableFiles.size === 1')
+    await run(a, `__test.playItem(${JSON.stringify(playlistIds[0])})`)
+    await until(a, '__test.session.role === "host" && document.getElementById("local-video").readyState >= 3')
+    await run(a, '__test.control("pause")')
+    await run(c, '__test.enterRoom("PERSIST1")')
+    await until(a, '__test.session.peers.size === 1')
+    await until(a, `__test.session.playlist.progress.get(${JSON.stringify(playlistIds[2])})?.time >= 5.5`)
+    await run(a, '__test.control("seek", 4)')
+    await Promise.all([a, c].map((win) => until(win, `Math.abs((__test.session.playlist.progress.get(${JSON.stringify(playlistIds[0])})?.time ?? 100) - 4) < 0.5`)))
+    console.log('PASS: A stale saved copy merges newer offline history and continues saving fresh playback progress')
+    const vanished = path.join(temporary, 'vanished.mp4')
+    fs.copyFileSync(video, vanished)
+    const vanishedId = await run(a, `__test.addToPlaylist([${JSON.stringify(vanished)}])[0].id`)
+    await until(c, `__test.session.playlist.items.has(${JSON.stringify(vanishedId)}) && __test.playable(__test.session.playlist.items.get(${JSON.stringify(vanishedId)}))`)
+    fs.unlinkSync(vanished)
+    await run(a, '__test.refreshAvailability()')
+    await until(c, `!__test.playable(__test.session.playlist.items.get(${JSON.stringify(vanishedId)}))`)
+    await run(c, `__test.removeFromPlaylist(${JSON.stringify(playlistIds[1])})`)
+    await until(a, `!__test.session.playlist.items.has(${JSON.stringify(playlistIds[1])})`)
+    await run(b, '__test.enterRoom("PERSIST1")')
+    await connected()
+    await until(b, `!__test.session.playlist.items.has(${JSON.stringify(playlistIds[1])}) && __test.session.ownFiles.size === 0`)
+    console.log('PASS: Missing files become unavailable; a returning owner’s stale snapshot cannot resurrect a removed item')
+    for (const win of windows) assert.deepEqual(await run(win, '__test.errors'), [])
   } finally {
     clearTimeout(watchdog)
     for (const win of windows) if (!win.isDestroyed()) win.destroy()

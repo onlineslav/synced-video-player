@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   chooseSubtitle: () => ipcRenderer.invoke('dialog:subtitle'),
   pathForFile: (file) => webUtils.getPathForFile(file),
   probe: (filePath) => ipcRenderer.invoke('media:probe', filePath),
+  availableFiles: (paths) => ipcRenderer.invoke('media:available-files', paths),
   readImage: (filePath) => ipcRenderer.invoke('media:image', filePath),
   startSession: (options) => ipcRenderer.invoke('session:start', options),
   pull: (sessionId) => ipcRenderer.invoke('session:pull', sessionId),

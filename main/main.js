@@ -53,6 +53,13 @@ function registerIpc() {
   ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))
   ipcMain.handle('dialog:subtitle', (event) => pickFile(event, 'Subtitles', SUBTITLE_EXTENSIONS))
   ipcMain.handle('media:probe', (_event, filePath) => media.probe(filePath))
+  ipcMain.handle('media:available-files', async (_event, paths) => {
+    if (!Array.isArray(paths) || paths.length > 500) return []
+    return Promise.all(paths.map(async (filePath) => {
+      if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return false
+      try { return (await fs.promises.stat(filePath)).isFile() } catch { return false }
+    }))
+  })
   ipcMain.handle('media:image', (_event, filePath) => media.readImage(filePath))
   ipcMain.handle('session:start', (_event, options) => media.startSession(options))
   ipcMain.handle('session:pull', (_event, id) => media.pull(id))

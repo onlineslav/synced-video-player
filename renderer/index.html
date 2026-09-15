@@ -88,6 +88,12 @@
           <input id="join-code" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false" aria-label="Room code" />
           <button type="submit">Join</button>
         </form>
+        <section id="saved-rooms" class="saved-rooms" hidden>
+          <h2>Your rooms</h2>
+          <p class="hint">Return to a room with its playlist and saved progress.</p>
+          <ul id="saved-room-items" class="saved-room-items"></ul>
+        </section>
+        <p id="room-save-error" class="friend-error" role="alert" hidden>Room changes could not be saved on this device.</p>
       </div>
     </main>
 
@@ -156,6 +162,7 @@
         <div id="empty" class="empty">
           <p id="empty-text"></p>
           <button data-open-media class="primary">Open media</button>
+          <button id="resume-room" hidden>Resume playlist</button>
         </div>
         <div id="spinner" class="spinner" hidden></div>
         <div id="link-warning" class="link-warning" tabindex="0" aria-label="Connection problem" hidden>

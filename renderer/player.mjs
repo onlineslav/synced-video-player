@@ -43,7 +43,7 @@ export class StreamPlayer extends EventTarget {
     return this.media?.duration || (Number.isFinite(this.video.duration) ? this.video.duration : 0)
   }
 
-  async open(filePath) {
+  async open(filePath, start = 0) {
     this.close()
     const generation = this.generation
     const media = await window.api.probe(filePath)
@@ -56,7 +56,7 @@ export class StreamPlayer extends EventTarget {
     await this.attachSource()
     if (generation !== this.generation) return false
     this.emit('media')
-    await this.startAt(0)
+    await this.startAt(Math.min(Math.max(0, start), Math.max(0, this.duration - 0.5)))
     return true
   }
 

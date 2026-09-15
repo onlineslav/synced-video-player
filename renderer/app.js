@@ -22,6 +22,7 @@ import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {cleanDisplayName, cleanText} from './profile.mjs'
 import {cleanRoomDetails, newerRoomDetails, renameRoom} from './room-name.mjs'
+import {RoomHistory} from './room-history.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -42,6 +43,7 @@ import {
   moveItem,
   positionAt,
   removeItem,
+  recordProgress,
   settledWidth,
 } from './playlist.mjs'
 import {averageLuminance, sourceRegion, toneFor} from './overlay.mjs'
@@ -130,6 +132,10 @@ const ui = {
   welcomeSubmit: $('welcome-submit'),
   welcomeCancel: $('welcome-cancel'),
   home: $('home'),
+  savedRooms: $('saved-rooms'),
+  savedRoomItems: $('saved-room-items'),
+  roomSaveError: $('room-save-error'),
+  resumeRoom: $('resume-room'),
   profileAvatar: $('profile-avatar'),
   profileName: $('profile-name'),
   username: $('username'),
@@ -225,6 +231,10 @@ const blankSession = () => ({
   closed: false,
   lifetime: new AbortController(),
   ownFiles: new Map(),
+  availableFiles: new Set(),
+  peerFiles: new Map(),
+  identities: new Map(),
+  openingMedia: false,
   catalog: new SubtitleCatalog(),
   authority: null,
   sequence: 0,
@@ -277,6 +287,37 @@ const blankSession = () => ({
   playing: null, // host: the playlist item being hosted {id, at}, so the next one can follow it
 })
 let session = blankSession()
+let roomHistory = null
+
+function saveRoom() {
+  if (!session.code || !roomHistory) return
+  try {
+    roomHistory.save(session)
+    ui.roomSaveError.hidden = true
+  } catch {
+    ui.roomSaveError.hidden = false
+    if (!session.saveErrorShown) toast('Could not save this room on this device.', true)
+    session.saveErrorShown = true
+  }
+}
+
+function renderSavedRooms() {
+  const rooms = roomHistory?.list() || []
+  ui.savedRooms.hidden = !rooms.length
+  ui.savedRoomItems.replaceChildren(...rooms.map((saved) => {
+    const row = element('li', 'saved-room')
+    const open = element('button', 'saved-room-open')
+    open.dataset.code = saved.code
+    const current = saved.playlist.items.get(saved.playlist.current?.id)
+    const progress = current && saved.playlist.progress.get(current.id)
+    open.append(element('strong', '', saved.details?.name || formatRoomCode(saved.code)),
+      element('span', 'hint', `${saved.playlist.items.size} items · ${formatRoomCode(saved.code)}`))
+    if (current) open.append(element('span', 'hint', `${current.title} · ${progress?.completed ? 'Finished' : formatTime(progress?.time || 0)}`))
+    open.addEventListener('click', () => enterRoom(saved.code, {joining: false}))
+    row.append(open)
+    return row
+  }))
+}
 
 // ---------- Room ----------
 
@@ -301,14 +342,16 @@ async function enterRoom(code, {joining = true} = {}) {
 async function openRoom(code, joining) {
   await network.ready
   if (!identity) throw new Error('Finish setting up your profile first')
+  const saved = roomHistory.load(code)
+  if (saved) joining = false
   const {turnConfig} = network.config()
   const peerIdentities = new Map()
   const verifying = new Set()
   const connection = {
-    joining, connectedBefore: false, waitingSince: performance.now(), error: null,
+    joining, persistent: Boolean(saved || !joining), connectedBefore: false, waitingSince: performance.now(), error: null,
     hasTurn: turnConfig.some(({urls}) => [].concat(urls).some((url) => /^turns?:/i.test(url))),
   }
-  const room = joinRoom({appId: APP_ID, password: code, ...network.config()}, code, {
+  const room = joinRoom({appId: `${APP_ID}-persistent-rooms`, password: code, ...network.config()}, code, {
     onPeerHandshake: async (peerId, send, receive) => {
       if (verifying.size + peerIdentities.size >= MAX_PEERS) throw new Error('Room is full (8 people)')
       verifying.add(peerId)
@@ -325,10 +368,12 @@ async function openRoom(code, joining) {
   })
   session = {
     ...blankSession(),
+    ...(saved && {playlist: saved.playlist, ownFiles: saved.ownFiles, claimedAt: saved.claimedAt, loop: saved.playlist.current?.loop || false}),
+    identities: peerIdentities,
     connection,
     code,
     room,
-    details: joining ? null : {name: `${myName}'s Room`, revision: 1, updatedBy: selfId},
+    details: saved?.details || (joining ? null : {name: `${myName}'s Room`, revision: 1, updatedBy: selfId}),
     detailsAction: room.makeAction('room-details'),
     stateAction: room.makeAction('state'),
     commandAction: room.makeAction('command'),
@@ -356,6 +401,7 @@ async function openRoom(code, joining) {
     const details = cleanRoomDetails(message)
     if (!details || !newerRoomDetails(details, session.details)) return
     session.details = details
+    saveRoom()
     render()
   }
   session.playlistAction.onMessage = limited('playlist', (message, {peerId}) => receivePlaylist(message, peerId))
@@ -382,15 +428,17 @@ async function openRoom(code, joining) {
   room.onPeerJoin = (peerId) => {
     if (session.room !== room) return
     connection.connectedBefore = true
+    connection.persistent = true
     connection.error = null
     session.peers.add(peerId)
+    person(peerId).username = peerIdentities.get(peerId) || null
     if (session.details) session.detailsAction.send(session.details, {target: peerId}).catch(() => {})
     session.profileAction.send(myProfile(), {target: peerId}).catch(() => {})
     session.boardAction.send({type: 'sync', ...boardSnapshot(session.board)}, {target: peerId}).catch(() => {})
     if (session.playlist.items.size || session.playlist.removed.size) {
       session.playlistAction.send({type: 'sync', ...playlistSnapshot(session.playlist)}, {target: peerId}).catch(() => {})
     }
-    person(peerId).username = peerIdentities.get(peerId) || null
+    shareAvailability(peerId)
     toast('Participant connected')
     if (session.role === 'host') {
       if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId, metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
@@ -403,6 +451,7 @@ async function openRoom(code, joining) {
   room.onPeerLeave = (peerId) => {
     if (session.room !== room) return
     session.peers.delete(peerId)
+    session.peerFiles.delete(peerId)
     peerIdentities.delete(peerId)
     if (!session.peers.size) {
       connection.waitingSince = performance.now()
@@ -412,10 +461,14 @@ async function openRoom(code, joining) {
     session.people.delete(peerId)
     forgetImage(peerId)
     if (session.role === 'viewer' && peerId === session.hostId) {
+      const previous = session.playlist.current
+      const wasPlaying = session.remote?.playing
       session.hostId = null
       session.remote = null
       detachRemoteStream()
       setRole('idle')
+      const coordinator = [selfId, ...session.peers].sort()[0]
+      if (wasPlaying && coordinator === selfId) playNext(previous)
     }
     toast('Participant left')
     render()
@@ -455,11 +508,16 @@ async function openRoom(code, joining) {
   setFriendsOpen(false)
   renderFriends() // friends get Invite buttons
   setRole('idle')
+  saveRoom()
+  refreshAvailability()
 }
 
 async function leaveRoom() {
   if (leavingRoom) return leavingRoom
   const current = session
+  checkpointPlayback()
+  saveRoom()
+  const finalSnapshot = current.playlistAction?.send({type: 'sync', ...playlistSnapshot(current.playlist)}).catch(() => {})
   current.closed = true
   current.lifetime.abort()
   current.imageSend?.abort()
@@ -480,8 +538,12 @@ async function leaveRoom() {
   ui.home.append(ui.friends, ui.friendNotification)
   setFriendsOpen(false)
   renderFriends()
+  renderSavedRooms()
   ui.create.disabled = ui.joinForm.querySelector('button').disabled = true
-  leavingRoom = Promise.resolve().then(() => current.room?.leave()).catch((error) => toast(errorMessage(error), true)).finally(() => {
+  leavingRoom = Promise.resolve().then(async () => {
+    if (finalSnapshot) await Promise.race([finalSnapshot, new Promise((resolve) => setTimeout(resolve, 500))])
+    await current.room?.leave()
+  }).catch((error) => toast(errorMessage(error), true)).finally(() => {
     leavingRoom = null
     ui.create.disabled = ui.joinForm.querySelector('button').disabled = false
     window.api.setInRoom(false)
@@ -501,8 +563,17 @@ function setRole(role) {
 async function hostFile(filePath, item = null) {
   if (!session.room || session.closed) return
   const current = session
-  const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt)
+  if (!item) {
+    item = [...session.playlist.items.values()].find((entry) => session.ownFiles.get(entry.id) === filePath)
+    item ||= addToPlaylist([filePath], {notify: false})[0]
+    if (!item) return
+  }
+  checkpointPlayback()
+  saveRoom()
+  const resume = session.playlist.progress.get(item.id)
+  const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt, session.playlist.revision)
   stopHosting()
+  session.openingMedia = true
   session.claimedAt = claimedAt
   session.authority = {hostId: selfId, claimedAt, sequence: 0}
   session.sequence = 0
@@ -516,8 +587,9 @@ async function hostFile(filePath, item = null) {
   broadcastState()
   if (isImagePath(filePath)) return hostImage(filePath, claimedAt)
   try {
-    const opened = await player.open(filePath)
+    const opened = await player.open(filePath, resume?.completed ? 0 : resume?.time || 0)
     if (session !== current || current.closed || current.claimedAt !== claimedAt || !isHost()) return
+    current.openingMedia = false
     if (opened) ui.localVideo.play().catch((error) => {
       if (session === current && !current.closed && current.claimedAt === claimedAt && isHost()) failHosting(error)
     })
@@ -535,6 +607,7 @@ function stopHosting() {
   unpublishStream()
   clearHostImage()
   session.playing = null
+  session.openingMedia = false
   setRole('idle')
 }
 
@@ -552,6 +625,7 @@ async function hostImage(filePath, claimedAt) {
     if (session !== current || current.closed || session.claimedAt !== claimedAt || !isHost()) return
     const url = URL.createObjectURL(new Blob([bytes], {type: mime}))
     session.image = {id: String(claimedAt), name, mime, bytes, url}
+    session.openingMedia = false
     sendImage()
   } catch (err) {
     if (session !== current || current.closed || session.claimedAt !== claimedAt || !isHost()) return
@@ -709,9 +783,11 @@ function hostState() {
     ended: Boolean(session.mediaError),
     error: session.mediaError,
     title: cleanText(hostedTitle(), 200),
-    loading: !media && !session.image && !session.mediaError,
+    loading: session.openingMedia || (!media && !session.image && !session.mediaError),
     image: session.image ? {id: session.image.id} : null,
     playlistId: session.playing?.id || null,
+    playlistPosition: session.playing?.position ?? 0,
+    finished: Boolean(video.ended && !session.loop),
     audioOnly: Boolean(media && !media.video),
     playing: hostPlaying(),
     buffering: hostPlaying() && video.readyState < 3,
@@ -816,12 +892,37 @@ async function sampleConnection() {
   } finally { current.sampling = false }
 }
 
+function checkpointPlayback(state = null) {
+  if (!state) {
+    if (!isHost() || session.openingMedia || session.mediaError || (!player.loaded && !session.image) || !session.playing) return
+    session.sequence = nextRevision(session.sequence)
+    state = hostState()
+  }
+  if (state.loading || state.ended || !state.playlistId) return
+  recordProgress(session.playlist, {id: state.playlistId, position: state.playlistPosition,
+    time: state.time, duration: state.duration, completed: state.finished, loop: state.loop,
+    hostId: state.hostId, claimedAt: state.claimedAt, sequence: state.sequence})
+}
+
 function broadcastState(target) {
   if (session.closed || session.role !== 'host' || !session.stateAction) return
   const current = session
   // Coalesce periodic/event updates behind an outstanding send; don't build a stale queue.
   if (current.sendPending && !target) { current.sendDirty = true; return }
+  // A returning peer may carry newer history than the copy we reopened. Keep
+  // that history, but let explicitly started playback issue fresh checkpoints.
+  if (!current.openingMedia && current.playlist.current && newerClaim(current.playlist.current, {hostId: selfId, claimedAt: current.claimedAt})) {
+    current.claimedAt = nextRevision(current.claimedAt, current.playlist.revision)
+    current.sequence = 0
+    if (current.stream) publishStream()
+    if (current.image) {
+      current.image.id = String(current.claimedAt)
+      sendImage()
+    }
+  }
   current.sequence = nextRevision(current.sequence)
+  checkpointPlayback()
+  saveRoom()
   current.authority = {hostId: selfId, claimedAt: current.claimedAt, sequence: current.sequence}
   if (!target) current.sendPending = true
   current.stateAction.send(hostState(), {signal: current.lifetime.signal, ...(target && {target})}).catch(() => {}).finally(() => {
@@ -836,6 +937,9 @@ function failHosting(error) {
   if (!isHost() || session.closed) return
   // Keep this claim alive with a terminal state so late/rejoining viewers learn it too.
   session.mediaError = 'The host could not play this media. Open another file to continue.'
+  session.openingMedia = false
+  if (session.playing) session.availableFiles.delete(session.playing.id)
+  shareAvailability()
   player.close()
   unpublishStream()
   clearHostImage()
@@ -864,6 +968,7 @@ function receiveState(value, peerId) {
   if (!state || !acceptsState(state, session.authority)) return
   const changed = !sameClaim(state, session.authority)
   if (isHost()) {
+    checkpointPlayback()
     stopHosting()
     toast('Another participant is hosting now')
   }
@@ -882,6 +987,8 @@ function receiveState(value, peerId) {
   session.hostId = state.hostId
   session.loop = state.loop
   session.remote = {...state, receivedAt: now}
+  checkpointPlayback(state)
+  saveRoom()
   for (const [id, receiver] of Object.entries(state.viewers)) if (session.peers.has(id)) person(id).receiver = receiver
   session.role = 'viewer'
   ui.stage.dataset.role = 'viewer'
@@ -1053,6 +1160,8 @@ async function updateWelcome() {
 
 function finishWelcome(next, mode) {
   identity = next
+  roomHistory = new RoomHistory(localStorage, identity.username)
+  renderSavedRooms()
   welcome = null
   ui.startup.hidden = true
   ui.welcome.hidden = true
@@ -1430,28 +1539,35 @@ function renderTools() {
 // asks the owner to host it, and when it ends the host starts the next one it can.
 
 const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>'
-// File capabilities belong to this room only (session.ownFiles).
+// File capabilities are restored only from this identity's local copy of this room.
 let itemCount = 0
 
-function addToPlaylist(filePaths) {
-  if (!session.room) return
-  let added = 0
+function addToPlaylist(filePaths, {notify = true} = {}) {
+  if (!session.room) return []
+  const added = []
   for (const filePath of filePaths.filter((p) => p && !SUBTITLE_FILE.test(p))) {
     const id = `${selfId}:${Date.now().toString(36)}:${itemCount++}`
     const message = {id, title: filePath.split(/[\\/]/).pop(), position: endPosition(session.playlist), ownerName: myName}
-    if (!addItem(session.playlist, message, selfId)) { toast('Playlist limit reached. Remove items, or open a new room if its history is full.', true); break }
+    const item = addItem(session.playlist, message, identity.username)
+    if (!item) { toast('Playlist limit reached. Remove items, or open a new room if its history is full.', true); break }
     session.ownFiles.set(message.id, filePath)
     session.playlistAction.send({type: 'add', ...message}).catch(() => {})
-    added++
+    added.push(item)
   }
-  if (added) toast(added === 1 ? 'Added to the playlist' : `Added ${added} files to the playlist`)
+  if (added.length && notify) toast(added.length === 1 ? 'Added to the playlist' : `Added ${added.length} files to the playlist`)
+  saveRoom()
+  refreshAvailability()
   render()
+  return added
 }
 
 function removeFromPlaylist(id) {
   removeItem(session.playlist, id)
   session.ownFiles.delete(id)
+  session.availableFiles.delete(id)
   session.playlistAction?.send({type: 'remove', id}).catch(() => {})
+  saveRoom()
+  shareAvailability()
   render()
 }
 
@@ -1463,53 +1579,118 @@ function moveInPlaylist(id, index) {
   // Stamped after the item's last move, so it wins even if that came from a clock running ahead.
   const move = {id, position, movedAt: nextRevision(session.playlist.revision), movedBy: selfId}
   if (moveItem(session.playlist, move)) session.playlistAction?.send({type: 'move', ...move}).catch(() => {})
+  saveRoom()
   render()
 }
 
 function receivePlaylist(message, peerId) {
-  if (message?.type === 'add') addItem(session.playlist, message, peerId)
+  const username = session.identities.get(peerId)
+  if (!username) return
+  if (message?.type === 'add') addItem(session.playlist, message, username)
   else if (message?.type === 'remove') {
     removeItem(session.playlist, message.id)
     session.ownFiles.delete(message.id)
+    session.availableFiles.delete(message.id)
   } else if (message?.type === 'move') moveItem(session.playlist, {...message, movedBy: peerId})
-  else if (message?.type === 'sync') mergePlaylist(session.playlist, message, {selfId, ownFiles: session.ownFiles})
+  else if (message?.type === 'sync') {
+    mergePlaylist(session.playlist, message, {selfId: identity.username, ownFiles: session.ownFiles})
+    for (const id of session.ownFiles.keys()) if (!session.playlist.items.has(id)) {
+      session.ownFiles.delete(id)
+      session.availableFiles.delete(id)
+    }
+    if (session.role === 'idle') session.loop = session.playlist.current?.loop || false
+    if (isHost()) broadcastState()
+  }
+  else if (message?.type === 'availability') {
+    if (!Array.isArray(message.ids) || message.ids.length > 500) return
+    session.peerFiles.set(peerId, new Set(message.ids.filter((id) => typeof id === 'string' && id.length <= 100)))
+  }
   else if (message?.type === 'play') playItem(message.id, peerId)
+  saveRoom()
   render()
 }
 
-const playable = (item) => (item.owner === selfId ? session.ownFiles.has(item.id) : session.peers.has(item.owner))
-const ownerName = (item) => (item.owner === selfId ? 'you' : session.people.get(item.owner)?.name || item.ownerName || 'Someone')
+function ownerPeer(item) {
+  if (item.owner === identity?.username) return selfId
+  return [...session.peers].find((id) => session.identities.get(id) === item.owner) || null
+}
+const playable = (item) => item.owner === identity?.username
+  ? session.ownFiles.has(item.id) && session.availableFiles.has(item.id)
+  : Boolean(session.peerFiles.get(ownerPeer(item))?.has(item.id))
+const ownerName = (item) => (item.owner === identity?.username ? 'you' : session.people.get(ownerPeer(item))?.name || item.ownerName || 'Someone')
 
-// Plays an item for everyone. `from` is the peer who asked, when the request came from someone else.
-function playItem(id, from = null) {
-  const item = session.playlist.items.get(id)
-  if (!item) return
-  if (item.owner === selfId) {
-    const filePath = session.ownFiles.get(id)
-    if (filePath) hostFile(filePath, item)
-  } else if (from == null) {
-    // Only the owner's app has the file, so it hosts; nobody relays requests for someone else's.
-    if (!session.peers.has(item.owner)) return toast(`${ownerName(item)} left, so that can't play`, true)
-    session.playlistAction.send({type: 'play', id}, {target: item.owner}).catch(() => {})
+function shareAvailability(target) {
+  session.playlistAction?.send({type: 'availability', ids: [...session.availableFiles]}, target ? {target} : {}).catch(() => {})
+}
+
+async function refreshAvailability() {
+  const current = session
+  const entries = [...current.ownFiles]
+  const generation = current.availabilityGeneration = (current.availabilityGeneration || 0) + 1
+  try {
+    const available = await window.api.availableFiles(entries.map(([, path]) => path))
+    if (session !== current || current.closed || generation !== current.availabilityGeneration) return
+    current.availableFiles = new Set(entries.filter(([id, path], i) => available[i] && current.ownFiles.get(id) === path).map(([id]) => id))
+    shareAvailability()
+    render()
+  } catch {
+    if (session === current && !current.closed) toast('Could not check saved media files.', true)
   }
 }
 
-function playNext() {
-  const next = nextItem(session.playlist, session.playing, playable)
+// Plays an item for everyone. `from` is the peer who asked, when the request came from someone else.
+async function playItem(id, from = null) {
+  const item = session.playlist.items.get(id)
+  if (!item) return
+  if (item.owner === identity.username) {
+    const current = session
+    const filePath = session.ownFiles.get(id)
+    if (!filePath) return
+    let available
+    try { [available] = await window.api.availableFiles([filePath]) } catch {
+      if (session === current && !current.closed) toast('Could not check this media file. Try again.', true)
+      return
+    }
+    if (session !== current || current.closed || current.ownFiles.get(id) !== filePath) return
+    if (available) {
+      current.availableFiles.add(id)
+      return hostFile(filePath, item)
+    }
+    current.availableFiles.delete(id)
+    shareAvailability()
+    render()
+    toast(`${item.title} is unavailable on this computer`, true)
+    playNext(item)
+  } else if (from == null) {
+    // Only the owner's app has the file, so it hosts; nobody relays requests for someone else's.
+    if (!playable(item)) return toast(`${item.title} is unavailable`, true)
+    session.playlistAction.send({type: 'play', id}, {target: ownerPeer(item)}).catch(() => {})
+  }
+}
+
+function playNext(current = session.playing || session.playlist.current) {
+  const next = nextItem(session.playlist, current, playable)
   if (next) playItem(next.id)
+}
+
+function resumeItem() {
+  const current = session.playlist.current
+  const item = session.playlist.items.get(current?.id)
+  if (item && playable(item) && !session.playlist.progress.get(item.id)?.completed) return item
+  return (current && nextItem(session.playlist, current, playable)) || orderedItems(session.playlist).find(playable) || null
 }
 
 function renderPlaylist() {
   const items = orderedItems(session.playlist)
-  const current = isHost() ? session.playing?.id : session.remote?.playlistId
+  const current = isHost() ? session.playing?.id : session.remote?.playlistId || session.playlist.current?.id
   ui.playlistEmpty.hidden = items.length > 0
-  const rows = items.map((item) => ({item, current: item.id === current, available: playable(item), owner: ownerName(item)}))
-  const signature = JSON.stringify(rows.map(({item, current, available, owner}) => [item.id, item.title, current, available, owner]))
+  const rows = items.map((item) => ({item, current: item.id === current, available: playable(item), owner: ownerName(item), progress: session.playlist.progress.get(item.id)}))
+  const signature = JSON.stringify(rows.map(({item, current, available, owner, progress}) => [item.id, item.title, current, available, owner, Math.floor(progress?.time || 0), progress?.completed]))
   // Don't rebuild the rows under someone dragging one; the list catches up when they let go.
   if (ui.playlistItems.dataset.signature === signature || itemDrag) return
   ui.playlistItems.dataset.signature = signature
   ui.playlistItems.replaceChildren(
-    ...rows.map(({item, current, available, owner}) => {
+    ...rows.map(({item, current, available, owner, progress}) => {
       const row = element('li', 'playlist-item')
       row.dataset.id = item.id
       row.title = 'Drag to reorder'
@@ -1518,11 +1699,11 @@ function renderPlaylist() {
       const play = element('button', 'playlist-play')
       play.innerHTML = PLAY_ICON
       play.disabled = !available
-      play.title = available ? 'Play for everyone' : `${owner} isn't in the room`
+      play.title = available ? 'Play for everyone from the saved position' : item.owner === identity?.username ? 'File missing on this computer' : 'Unavailable until the owner rejoins with this file'
       play.setAttribute('aria-label', `Play ${item.title}`)
       play.addEventListener('click', () => playItem(item.id))
       const main = element('div', 'person-main')
-      const status = !available ? `${owner} left, so this can't play` : `${current ? 'Playing · ' : ''}Added by ${owner}`
+      const status = `${!available ? 'Unavailable · ' : current && session.role !== 'idle' ? 'Playing · ' : ''}Added by ${owner}${progress ? ` · ${progress.completed ? 'Finished' : formatTime(progress.time)}` : ''}`
       main.append(element('div', 'person-name', item.title), element('div', 'person-stats', status))
       main.firstChild.title = item.title
       const remove = element('button', 'playlist-remove', '×')
@@ -1816,6 +1997,9 @@ function render() {
   ui.peerStatus.classList.toggle('connected', peerCount > 0)
   renderPeople()
   renderPlaylist()
+  const resume = role === 'idle' ? resumeItem() : null
+  ui.resumeRoom.hidden = !resume
+  if (resume) ui.resumeRoom.textContent = `Resume ${resume.title} · ${formatTime(session.playlist.progress.get(resume.id)?.completed ? 0 : session.playlist.progress.get(resume.id)?.time || 0)}`
   sampleTabTone()
   syncBoardLayout()
   syncPresence()
@@ -1913,6 +2097,7 @@ ui.code.addEventListener('click', async () => {
 })
 
 ui.leave.addEventListener('click', leaveRoom)
+ui.resumeRoom.addEventListener('click', () => { const item = resumeItem(); if (item) playItem(item.id) })
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
 for (const [button, tool] of [[ui.pen, 'pen'], [ui.eraser, 'eraser']]) {
@@ -1975,6 +2160,7 @@ function saveRoomName() {
   const details = renameRoom(ui.roomName.value, session.details, selfId)
   if (details !== session.details) {
     session.details = details
+    saveRoom()
     session.detailsAction.send(session.details).catch(() => toast('Room name could not be shared. Try again.', true))
   }
   ui.roomName.value = session.details?.name || ''
@@ -2435,6 +2621,8 @@ for (const type of ['play', 'pause', 'seeked', 'waiting', 'playing']) {
 // Without loop, a file started from the playlist moves on to the next item.
 ui.localVideo.addEventListener('ended', () => {
   if (!isHost()) return
+  checkpointPlayback()
+  saveRoom()
   if (!session.loop) return playNext()
   player.seek(0)
   ui.localVideo.play().catch(() => {})
@@ -2548,6 +2736,8 @@ ui.stage.addEventListener('drop', (event) => {
 })
 
 window.addEventListener('beforeunload', () => {
+  checkpointPlayback()
+  saveRoom()
   session.room?.leave()
   friendNetwork.stop()
   network.stop()
@@ -2557,6 +2747,7 @@ setInterval(render, 250)
 requestAnimationFrame(drawCaptions)
 setInterval(sendStroke, 50)
 setInterval(() => sampleConnection().catch(() => {}), TELEMETRY_INTERVAL_MS)
+setInterval(() => { if (session.room && !session.closed) refreshAvailability() }, 10000)
 setInterval(() => {
   if (!isHost()) return
   broadcastState()

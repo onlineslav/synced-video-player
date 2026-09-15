@@ -4,6 +4,14 @@ import {JOIN_WAIT_MS, roomConnection} from '../renderer/connection.mjs'
 
 const waiting = {joining: true, connectedBefore: false, waitingSince: 100, error: null, hasTurn: false}
 
+test('an empty saved room remains usable instead of reporting a failed join', () => {
+  const status = roomConnection({...waiting, persistent: true, connectedBefore: true}, 0, JOIN_WAIT_MS * 10)
+  assert.equal(status.problem, false)
+  assert.match(status.text, /only one here/)
+  assert.match(status.detail, /saved/)
+  assert.equal(roomConnection({...waiting, persistent: true, error: 'connection failed'}, 0, JOIN_WAIT_MS * 10).problem, true)
+})
+
 test('entering a code stays joining until a peer actually connects', () => {
   const joining = roomConnection(waiting, 0, 100)
   assert.match(joining.text, /Connecting/)

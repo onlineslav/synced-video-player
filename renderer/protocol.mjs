@@ -59,6 +59,8 @@ export function cleanState(value, peerId) {
   if (value.subtitleSelected && !subtitles.some((t) => t.value === value.subtitleSelected)) return null
   if (value.image !== null && (!isRecord(value.image) || value.image.id !== String(value.claimedAt))) return null
   if (value.playlistId !== null && !isId(value.playlistId)) return null
+  if (value.playlistPosition !== undefined && !Number.isFinite(value.playlistPosition)) return null
+  if (value.finished !== undefined && typeof value.finished !== 'boolean') return null
   if (value.title != null && (typeof value.title !== 'string' || value.title.length > 1000)) return null
   const viewers = {}, senders = {}
   for (const [field, cleaner, out] of [['viewers', cleanTelemetry, viewers], ['senders', cleanSender, senders]]) {
@@ -76,7 +78,8 @@ export function cleanState(value, peerId) {
     buffering: value.buffering, loop: value.loop, audioOnly: value.audioOnly,
     transcoding: value.transcoding, ended: value.ended, image: value.image && {id: value.image.id},
     error: typeof value.error === 'string' ? cleanText(value.error, 200) : null,
-    playlistId: value.playlistId, audio, subtitles, audioSelected: value.audioSelected,
+    playlistId: value.playlistId, playlistPosition: value.playlistPosition ?? 0, finished: value.finished === true,
+    audio, subtitles, audioSelected: value.audioSelected,
     subtitleSelected: value.subtitleSelected, sender: cleanSender(value.sender), viewers, senders,
   }
 }

@@ -5,19 +5,19 @@
 // Items are ordered by `position` (ties by id). Anyone can move an item by giving it a new position;
 // the latest move wins everywhere (`movedAt`, then `movedBy`), so reorders from two people converge.
 import {cleanDisplayName, cleanText} from './profile.mjs'
-import {isRevision} from './protocol.mjs'
+import {isRevision, finite} from './protocol.mjs'
 
 export const MAX_ITEMS = 500
 export const MAX_REMOVED = 4096
 export const MAX_TITLE_LENGTH = 200
 const MAX_ID_LENGTH = 100
 
-export const createPlaylist = () => ({items: new Map(), removed: new Set(), pendingMoves: new Map(), revision: 0})
+export const createPlaylist = () => ({items: new Map(), removed: new Set(), pendingMoves: new Map(), progress: new Map(), current: null, revision: 0})
 
 const isId = (id) => typeof id === 'string' && id.length > 0 && id.length <= MAX_ID_LENGTH
 const isNewerMove = (a, b) => (a.movedAt !== b.movedAt ? a.movedAt > b.movedAt : a.movedBy > b.movedBy)
 
-// Adds an item from a peer. `owner` is the peer id whose app has the file. Returns the item, or
+// Adds an item from a peer. `owner` is their persistent, authenticated username. Returns the item, or
 // null if it was rejected, already removed, or already there.
 export function addItem(playlist, {id, title, position, ownerName, movedAt = 0, movedBy = ''}, owner) {
   if (!isId(id) || !isId(owner) || !Number.isFinite(position) || playlist.removed.has(id) || playlist.items.has(id)) return null
@@ -59,9 +59,35 @@ export function removeItem(playlist, id) {
   playlist.removed.add(id)
   playlist.items.delete(id)
   playlist.pendingMoves.delete(id)
+  playlist.progress.delete(id)
 }
 
-export const playlistSnapshot = (playlist) => ({items: [...playlist.items.values()], removed: [...playlist.removed]})
+export const playlistSnapshot = (playlist) => ({items: [...playlist.items.values()], removed: [...playlist.removed], progress: [...playlist.progress.values()], current: playlist.current})
+
+// Host claims and their state sequence keep progress ordered even across restarts,
+// seeks backwards, delayed snapshots and hosts with different wall clocks.
+const newerProgress = (a, b) => !b || a.claimedAt > b.claimedAt || (a.claimedAt === b.claimedAt &&
+  (a.hostId > b.hostId || (a.hostId === b.hostId && a.sequence > b.sequence)))
+
+export function cleanProgress(value) {
+  if (!value || !isId(value.id) || !isId(value.hostId) || !isRevision(value.claimedAt) || !value.claimedAt ||
+      !isRevision(value.sequence) || !finite(value.time, 0, 1e9) || !finite(value.duration, 0, 1e9) ||
+      !Number.isFinite(value.position) || typeof value.completed !== 'boolean' || typeof value.loop !== 'boolean') return null
+  return {id: value.id, position: value.position, time: Math.min(value.time, value.duration || value.time), duration: value.duration,
+    completed: value.completed, loop: value.loop, claimedAt: value.claimedAt, hostId: value.hostId, sequence: value.sequence}
+}
+
+export function recordProgress(playlist, value) {
+  const progress = cleanProgress(value)
+  if (!progress) return false
+  playlist.revision = Math.max(playlist.revision, progress.claimedAt)
+  // Keep the cursor even if its item was removed, so Next still follows its position.
+  if (newerProgress(progress, playlist.current)) playlist.current = progress
+  if (playlist.removed.has(progress.id) || (!playlist.progress.has(progress.id) && playlist.progress.size >= MAX_ITEMS) ||
+      !newerProgress(progress, playlist.progress.get(progress.id))) return false
+  playlist.progress.set(progress.id, progress)
+  return true
+}
 
 // Someone joining gets a snapshot from everyone already in the room; merging is idempotent.
 export function mergePlaylist(playlist, snapshot, {selfId, ownFiles} = {}) {
@@ -71,6 +97,8 @@ export function mergePlaylist(playlist, snapshot, {selfId, ownFiles} = {}) {
     if (playlist.items.has(item?.id)) moveItem(playlist, item)
     else addItem(playlist, item || {}, item?.owner)
   }
+  for (const progress of Array.isArray(snapshot?.progress) ? snapshot.progress.slice(0, MAX_ITEMS) : []) recordProgress(playlist, progress)
+  recordProgress(playlist, snapshot?.current)
 }
 
 const compare = (a, b) => a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)

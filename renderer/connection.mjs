@@ -2,8 +2,9 @@ export const JOIN_WAIT_MS = 30_000
 
 // A room exists locally before any remote peer has connected. Entering its code
 // must not be presented as a successful join or as creating a new room.
-export function roomConnection({joining, connectedBefore, waitingSince, error, hasTurn}, peerCount, now) {
+export function roomConnection({joining, persistent, connectedBefore, waitingSince, error, hasTurn}, peerCount, now) {
   if (peerCount) return {text: 'Friend connected', detail: '', problem: false}
+  if (persistent && !error) return {text: "You're the only one here", detail: 'Your playlist and progress are saved. Invite someone or play available media.', problem: false}
   const delayed = (joining || connectedBefore) && now - waitingSince >= JOIN_WAIT_MS
   if (error || delayed) {
     const foundPeer = error?.includes('after exchanging SDP')
