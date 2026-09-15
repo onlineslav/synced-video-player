@@ -23,6 +23,7 @@ import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandl
 import {cleanDisplayName, cleanText} from './profile.mjs'
 import {cleanRoomDetails, newerRoomDetails, renameRoom} from './room-name.mjs'
 import {RoomHistory} from './room-history.mjs'
+import {RoomPresence} from './room-presence.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
@@ -310,13 +311,30 @@ function renderSavedRooms() {
     open.dataset.code = saved.code
     const current = saved.playlist.items.get(saved.playlist.current?.id)
     const progress = current && saved.playlist.progress.get(current.id)
-    open.append(element('strong', '', saved.details?.name || formatRoomCode(saved.code)),
-      element('span', 'hint', `${saved.playlist.items.size} items · ${formatRoomCode(saved.code)}`))
+    open.append(element('strong', '', saved.details?.name || 'Saved room'),
+      element('span', 'hint', `${saved.playlist.items.size} items`),
+      element('span', 'saved-room-members hint'))
     if (current) open.append(element('span', 'hint', `${current.title} · ${progress?.completed ? 'Finished' : formatTime(progress?.time || 0)}`))
     open.addEventListener('click', () => enterRoom(saved.code, {joining: false}))
     row.append(open)
     return row
   }))
+  renderRoomMembers()
+}
+
+function renderRoomMembers() {
+  for (const card of ui.savedRoomItems.querySelectorAll('.saved-room-open')) {
+    const {members, error} = roomPresence.list(card.dataset.code)
+    const label = card.querySelector('.saved-room-members')
+    label.textContent = members.length ? `In room: ${members.map((member) => member.name || member.username).join(', ')}`
+      : error ? 'Presence unavailable' : 'No one connected'
+  }
+}
+
+function updateRoomPresence() {
+  if (!identity || roomPresence.identity !== identity) return
+  const activeCode = session.room && !session.closed ? session.code : null
+  roomPresence.update(activeCode ? [activeCode] : roomHistory.codes(), activeCode, myName)
 }
 
 // ---------- Room ----------
@@ -1064,6 +1082,7 @@ function myStatus() {
 
 let sharedStatus = ''
 function syncPresence() {
+  updateRoomPresence()
   const status = JSON.stringify(myStatus())
   if (!friendNetwork.identity || status === sharedStatus) return
   sharedStatus = status
@@ -1192,6 +1211,8 @@ const localStore = {
 
 const network = createNetwork({getIceServers: () => window.api.iceServers(), PeerConnection: RTCPeerConnection})
 const friendNetwork = new FriendNetwork({joinRoom: (config, ...rest) => joinRoom({...config, ...network.config()}, ...rest), selfId, appId: APP_ID, storage: localStore})
+const roomPresence = new RoomPresence({joinRoom: (config, ...rest) => joinRoom({...config, ...network.config()}, ...rest), selfId, appId: APP_ID})
+roomPresence.addEventListener('change', renderRoomMembers)
 const networkReady = network.ready.then(() => network.config().turnConfig)
 network.addEventListener('change', () => {
   if (network.error) showFriendNotice(network.error)
@@ -1212,6 +1233,8 @@ async function startFriends(next, mode) {
     const turnConfig = await networkReady
     await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
     if (identity !== next) return // the username changed while network setup was pending
+    roomPresence.start(next)
+    updateRoomPresence()
     friendNetwork.turnConfig = turnConfig
     if (mode === 'change') friendNetwork.restart(next)
     else friendNetwork.start(next, myProfile())
@@ -2740,6 +2763,7 @@ window.addEventListener('beforeunload', () => {
   saveRoom()
   session.room?.leave()
   friendNetwork.stop()
+  roomPresence.stop()
   network.stop()
 })
 

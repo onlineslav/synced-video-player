@@ -43,6 +43,8 @@ A small-room watch-together app (up to eight people). There is no server: peers 
 
 ## Verified constraints (don't regress these)
 
+- **Saved-room presence** (`renderer/room-presence.mjs`): Home watches saved codes on a separate `${APP_ID}-room-presence` channel; active participants watch only their current room. Signed handshakes bind identity to the presence channel, and only peers advertising active membership appear on cards. Observers never join media rooms or count as occupants. Heartbeats expire after 30 seconds; leaving removes names immediately when connected. Channel disposal is serialized before reuse. Presence is live and is not persisted in room history.
+
 - **Entry point is `main/index.js`,** which calls `start()` from `main/main.js`. Electron 44 doesn't set `require.main` to the entry file, so a `require.main === module` check never runs and the app idles with no window.
 
 - **Loop restarts must not look like pauses.** A `<video>` that reaches its end sets `paused` and fires `pause` before `ended`. The host's playing state is `hostPlaying()`, which counts `ended` with loop on as playing; otherwise every loop brings the UI back and viewers see a pause.
