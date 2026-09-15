@@ -1,14 +1,13 @@
-## What's new in 0.3.0
+## What's new in 0.4.0
 
-**Everyone needs 0.3.0.** It can't connect to older versions. Windows 0.2.0 updates itself; on a Mac, use the download button on the home screen.
+**Everyone needs 0.4.0 to use persistent rooms together.** Windows installs the update automatically; on a Mac, use the download button on the home screen.
 
-- **Up to eight people** in a room.
-- **Smoother playback:** video quality adjusts for each viewer's connection, and play/pause/seek and subtitles line up more closely.
-- **Clearer connection info:** the indicator explains packet loss, slow uploads and relay use. A host that stops responding shows as stalled, and a file that fails to open shows an error for everyone.
-- **Friends:** friend requests and who's online are easier to see, and unanswered requests expire with a Retry button.
-- **Room name:** view and edit it from the couch panel.
-- **Safer rooms:** people must prove who they are to join, and nobody in a room can make your app open files or links.
-- **Faster startup:** no more stalls while connecting.
+- **Persistent rooms:** rooms now remain on the home screen after everyone leaves or restarts the app. Room names, playlists, ordering, removals and loop state are restored when you return.
+- **Resume where you stopped:** each playlist item remembers its own playback position. Choose **Resume** when reopening a room to continue from the saved item and progress.
+- **Live room presence:** saved-room cards show who is currently inside without making you join the room.
+- **Files stay private:** local paths never leave their owner's computer. Missing or offline files remain in the playlist as unavailable and return when their owner reconnects.
+- **Better handoff:** if the active host leaves, another participant advances to the next available playlist item.
+- **More reliable audio:** shared audio recovers correctly when a stream switches its capture track.
 
 ## Download
 
