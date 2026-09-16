@@ -1,13 +1,10 @@
-## What's new in 0.4.0
+## What's new in 0.4.1
 
-**Everyone needs 0.4.0 to use persistent rooms together.** Windows installs the update automatically; on a Mac, use the download button on the home screen.
+**Everyone needs 0.4.1 to connect to rooms together.** Windows installs the update automatically; on a Mac, use the download button on the home screen.
 
-- **Persistent rooms:** rooms now remain on the home screen after everyone leaves or restarts the app. Room names, playlists, ordering, removals and loop state are restored when you return.
-- **Resume where you stopped:** each playlist item remembers its own playback position. Choose **Resume** when reopening a room to continue from the saved item and progress.
-- **Live room presence:** saved-room cards show who is currently inside without making you join the room.
-- **Files stay private:** local paths never leave their owner's computer. Missing or offline files remain in the playlist as unavailable and return when their owner reconnects.
-- **Better handoff:** if the active host leaves, another participant advances to the next available playlist item.
-- **More reliable audio:** shared audio recovers correctly when a stream switches its capture track.
+- **Room joining fixed:** friends, rooms and saved-room presence share an established connection again. This restores the reliable behavior from 0.3 when public discovery is delayed or unavailable.
+- **Reliable reconnecting:** leaving and rejoining a room continues to work through the existing friend connection.
+- **Version shown on Home:** the installed version now appears in the lower-left corner, making it easy to confirm both people are up to date.
 
 ## Download
 

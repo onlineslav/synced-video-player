@@ -49,6 +49,7 @@ async function pickFiles(event, name, extensions, multiple = false) {
 const pickFile = (event, name, extensions) => pickFiles(event, name, extensions).then((paths) => paths[0] || null)
 
 function registerIpc() {
+  ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('dialog:media', (event) => pickFile(event, 'Media', MEDIA_EXTENSIONS))
   ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))
   ipcMain.handle('dialog:subtitle', (event) => pickFile(event, 'Subtitles', SUBTITLE_EXTENSIONS))

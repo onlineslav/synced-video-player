@@ -133,6 +133,7 @@ const ui = {
   welcomeSubmit: $('welcome-submit'),
   welcomeCancel: $('welcome-cancel'),
   home: $('home'),
+  appVersion: $('app-version'),
   savedRooms: $('saved-rooms'),
   savedRoomItems: $('saved-room-items'),
   roomSaveError: $('room-save-error'),
@@ -2352,6 +2353,10 @@ loadIdentity().then((loaded) => {
   ui.startup.hidden = false
   ui.startupStatus.textContent = `Could not load your profile: ${errorMessage(error)}. Restart the app to try again.`
 })
+
+window.api.getVersion().then((version) => {
+  if (typeof version === 'string' && version.length <= 40) ui.appVersion.textContent = `Version ${version}`
+}, () => {})
 
 // Mac can't install updates itself, so home shows a card when a newer release is out.
 window.api.checkForUpdate().then((update) => {

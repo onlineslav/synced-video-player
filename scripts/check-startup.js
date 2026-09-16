@@ -24,6 +24,7 @@ async function until(win, condition, timeoutMs = 2500) {
 app.whenReady().then(async () => {
   const windows = []
   const pendingNetwork = []
+  ipcMain.handle('app:version', () => app.getVersion())
   ipcMain.handle('net:ice-servers', () => new Promise((resolve) => pendingNetwork.push(resolve)))
   ipcMain.handle('update:check', () => null)
   ipcMain.handle('session:stop', () => {})
@@ -55,6 +56,7 @@ app.whenReady().then(async () => {
     await win.loadFile(path.join(root, 'renderer/index.html'))
     await until(win, '!document.getElementById("home").hidden')
     assert.equal(await run(win, 'document.getElementById("username").textContent'), username)
+    assert.equal(await run(win, 'document.getElementById("app-version").textContent'), `Version ${app.getVersion()}`)
     assert.equal(await run(win, 'document.getElementById("startup").hidden'), true)
     console.log(`PASS: Returning-user Home appears in ${Date.now() - reloaded} ms while network setup is stalled`)
 

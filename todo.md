@@ -4,12 +4,21 @@ change word 'video' to 'media' and allow all media types.
 
 # TODO
 
+- the middle open media button can add multiple files instead of just one (they go into the playlist)
+don't say "Resume <filename> just say resume from timestamp. When paused, show the name of the file on top of the screen (like in Plex or VLC) - make it translucent, more opaque as you hover over it.
+- don't do the resume prompt if it's at 0:00
+
+- [x] Fix 0.4 connection regression: "Connection unavailable · retrying" and room joining stuck while both friends are online (fixed in 0.4.1)
+
+- split subs and dubs
+
 Names
 watch3gether
 syncplayer
 mediasync
 syncplay
 watch3gether
+witchparty
 
 - bruh, uwu, air horn
 

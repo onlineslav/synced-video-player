@@ -194,6 +194,15 @@ button.ghost {
   z-index: 2;
 }
 
+.home-version {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+
 .pin-toggle[aria-pressed='true'] svg,
 .controls .pin-toggle[aria-pressed='true'] svg {
   fill: var(--accent);
