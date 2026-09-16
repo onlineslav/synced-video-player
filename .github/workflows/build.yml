@@ -33,6 +33,8 @@ jobs:
       - name: Check bundled ffmpeg can burn in subtitles
         run: node -e "const out = require('child_process').execFileSync(require('ffmpeg-static'), ['-hide_banner', '-filters']).toString(); if (!/ subtitles /.test(out)) throw new Error('bundled ffmpeg lacks libass')"
       - run: npm test
+      - name: Check room joining during a discovery outage
+        run: npm run test:connections
       - name: Add TURN relay config
         if: env.TURN_CONFIG != ''
         shell: bash

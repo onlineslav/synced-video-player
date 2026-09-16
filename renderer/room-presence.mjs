@@ -54,7 +54,9 @@ export class RoomPresence extends EventTarget {
     if (!active()) return
     const verifying = new Set()
     try {
-      const room = this.joinRoom({appId: `${this.appId}-room-presence`, password: link.code}, link.code, {
+      // Isolate presence by room ID, not appId: Trystero shares connections only
+      // within an appId, including when the public discovery relays are down.
+      const room = this.joinRoom({appId: this.appId, password: link.code}, `presence:${link.code}`, {
         onPeerHandshake: async (peerId, send, receive) => {
           if (!active() || verifying.size + link.identities.size >= 64) throw new Error('Presence channel is full')
           verifying.add(peerId)

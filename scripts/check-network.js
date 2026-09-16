@@ -1,5 +1,6 @@
-// Real WebRTC and application code; only discovery is replaced with local IPC.
-// Hidden windows use disposable identities, synthetic media, and no public relays.
+// Real WebRTC and application code; discovery normally uses local IPC.
+// --public-discovery checks Nostr with different room startup orders instead.
+// Hidden windows use disposable identities and loopback media connections.
 const {app, BrowserWindow, ipcMain} = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -10,18 +11,19 @@ const {execFileSync} = require('node:child_process')
 const esbuild = require('esbuild')
 
 const root = path.resolve(__dirname, '..')
+const publicDiscovery = process.argv.includes('--public-discovery')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'synced-network-test-'))
 app.setPath('userData', path.join(temporary, 'profile'))
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const run = (win, source) => win.webContents.executeJavaScript(source).catch((error) => { throw new Error(`${error.message}\nExecuting: ${source}`) })
-async function until(win, condition, timeoutMs = 15000) {
+async function until(win, condition, timeoutMs = publicDiscovery ? 90000 : 15000) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     if (await run(win, condition)) return
     await pause(100)
   }
-  console.error(await run(win, `JSON.stringify({role:__test.session.role, peers:[...__test.session.peers], remote:__test.session.remote, connection:__test.session.connection, video:{ready:document.getElementById('remote-video').readyState, frames:document.getElementById('remote-video').getVideoPlaybackQuality().totalVideoFrames}, errors:__test.errors})`))
+  console.error(await run(win, `JSON.stringify({friends:__test.friendNetwork.list(), role:__test.session.role, peers:[...__test.session.peers], remote:__test.session.remote, connection:__test.session.connection, video:{ready:document.getElementById('remote-video').readyState, frames:document.getElementById('remote-video').getVideoPlaybackQuality().totalVideoFrames}, errors:__test.errors})`))
   assert.fail(`Timed out: ${condition}`)
 }
 
@@ -60,6 +62,7 @@ async function fixtures() {
     window.__test = {
       get session() { return session }, get identity() { return identity },
       friendNetwork, enterRoom, leaveRoom, hostFile, control, receiveImage, shownImage, selectSubtitle,
+      primeDiscovery: (kind) => joinRoom({...network.config(), appId: APP_ID}, kind + ':startup-probe'),
       addToPlaylist, playItem, playNext, playable, orderedItems, moveInPlaylist, removeFromPlaylist, refreshAvailability, setPlaylistOpen,
       get history() { return roomHistory },
       audioState: () => ({running: audio?.state === 'running', connected: Boolean(remoteAudio)}),
@@ -94,7 +97,13 @@ async function fixtures() {
   await esbuild.build({stdin: {contents: source, resolveDir: path.join(root, 'renderer')}, bundle: true, format: 'iife', target: 'chrome130', outfile: path.join(temporary, 'bundle.js'), plugins: [{
     name: 'local-discovery', setup(build) {
       build.onResolve({filter: /^trystero$/}, () => ({path: 'trystero', namespace: 'local'}))
-      build.onLoad({filter: /.*/, namespace: 'local'}, () => ({resolveDir: root, contents: `
+      build.onLoad({filter: /.*/, namespace: 'local'}, () => ({resolveDir: root, contents: publicDiscovery ? `
+        import {joinRoom as join, selfId} from './node_modules/@trystero-p2p/nostr/dist/index.mjs';
+        export {selfId};
+        export const joinRoom = (config, code, callbacks) => join({...config,
+          _test_only_mdnsHostFallbackToLoopback: true,
+        }, code, callbacks);
+      ` : `
         import {createTopicStrategy, selfId} from './node_modules/@trystero-p2p/core/dist/index.mjs';
         const join = createTopicStrategy({
           init: () => [{}], steadyAnnounceIntervalMs: 1000,
@@ -111,6 +120,7 @@ async function fixtures() {
   const html = fs.readFileSync(path.join(root, 'renderer/index.html'), 'utf8')
     .replace('href="styles.css"', `href="${pathToFileURL(path.join(root, 'renderer/styles.css'))}"`)
   fs.writeFileSync(path.join(temporary, 'index.html'), html)
+  if (publicDiscovery) return {}
   const video = path.join(temporary, 'sample.mp4')
   execFileSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440', '-f', 'lavfi', '-i', 'sine=frequency=880', '-map', '0:v', '-map', '1:a', '-map', '2:a', '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=jpn', '-t', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', video], {windowsHide: true, timeout: 15000})
   fs.writeFileSync(path.join(temporary, 'sample.srt'), '1\n00:00:00,000 --> 00:00:20,000\nShared test caption\n')
@@ -123,7 +133,7 @@ async function fixtures() {
 
 app.whenReady().then(async () => {
   const windows = []
-  const watchdog = setTimeout(() => { console.error('Network integration check exceeded 120 seconds'); app.exit(1) }, 120000)
+  const watchdog = setTimeout(() => { console.error('Network integration check timed out'); app.exit(1) }, publicDiscovery ? 240000 : 120000)
   try {
     const {video, picture, sound} = await fixtures()
     require('../main/main').registerIpc()
@@ -133,10 +143,11 @@ app.whenReady().then(async () => {
       const win = new BrowserWindow({show: false, webPreferences: {partition: `network-${name}`, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required', preload: path.join(temporary, 'preload.js')}})
       windows.push(win)
       win.webContents.on('console-message', (details) => {
-        if (details.level === 'error') console.error(`${name}: ${details.message}`)
+        if (details.level === 'error' || publicDiscovery && details.level === 'warning') console.error(`${name}: ${details.message}`)
       })
       await win.loadFile(path.join(temporary, 'index.html'))
       await until(win, 'window.__test && !document.getElementById("welcome").hidden')
+      if (publicDiscovery && name !== 'bravo') await run(win, `__test.primed = __test.primeDiscovery(${JSON.stringify(name === 'alpha' ? 'presence' : 'persistent')}); true`)
       await run(win, `document.getElementById('handle').value=${JSON.stringify(name)}; document.getElementById('welcome-name').value=${JSON.stringify(name)}; document.getElementById('welcome-form').dispatchEvent(new Event('submit', {cancelable:true}));`)
       await until(win, '__test.friendNetwork.identity && !document.getElementById("home").hidden')
     }
@@ -146,7 +157,7 @@ app.whenReady().then(async () => {
     await until(b, '__test.friendNetwork.requests.size === 1')
     await run(b, `__test.friendNetwork.add(${JSON.stringify(names[0])})`)
     await Promise.all([a, b].map((win) => until(win, '__test.friendNetwork.online.size === 1')))
-    console.log('PASS: Signed friend request, acceptance and presence over real local WebRTC')
+    console.log(`PASS: Signed friend request, acceptance and presence via ${publicDiscovery ? 'public Nostr relays' : 'local discovery'} and real WebRTC`)
 
     const joinAll = () => Promise.all(windows.map((win) => run(win, '__test.enterRoom("ABCDEFGH")')))
     const connected = () => Promise.all(windows.map((win) => until(win, '__test.session.peers.size === 2')))
@@ -170,6 +181,15 @@ app.whenReady().then(async () => {
     await Promise.all([a, c].map((win) => until(win, 'document.getElementById("room-name").value === "Film Club"')))
     console.log('PASS: New arrivals receive the saved room name and subsequent edits synchronize')
     console.log('PASS: Three authenticated room participants connect while friends remain online')
+    if (publicDiscovery) {
+      await run(b, '__test.leaveRoom()')
+      await until(a, '__test.session.peers.size === 1')
+      await run(b, '__test.enterRoom("ABCDEFGH")')
+      await connected()
+      for (const win of windows) assert.deepEqual(await run(win, '__test.errors'), [])
+      console.log('PASS: Public discovery connects across presence-first, friends-first and media-first startup, including rejoining')
+      return
+    }
     await run(a, `__test.hostFile(${JSON.stringify(video)})`)
     await Promise.all([b, c].map((win) => until(win, '__test.session.role === "viewer" && document.getElementById("remote-video").getVideoPlaybackQuality().totalVideoFrames > 12')))
     await until(b, '__test.session.clock !== null')

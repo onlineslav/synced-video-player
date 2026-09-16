@@ -369,7 +369,9 @@ async function openRoom(code, joining) {
     joining, persistent: Boolean(saved || !joining), connectedBefore: false, waitingSince: performance.now(), error: null,
     hasTurn: turnConfig.some(({urls}) => [].concat(urls).some((url) => /^turns?:/i.test(url))),
   }
-  const room = joinRoom({appId: `${APP_ID}-persistent-rooms`, password: code, ...network.config()}, code, {
+  // Keep one transport appId so friends, presence and media reuse an established
+  // connection. The room ID isolates the persistent protocol from older rooms.
+  const room = joinRoom({appId: APP_ID, password: code, ...network.config()}, `persistent:${code}`, {
     onPeerHandshake: async (peerId, send, receive) => {
       if (verifying.size + peerIdentities.size >= MAX_PEERS) throw new Error('Room is full (8 people)')
       verifying.add(peerId)

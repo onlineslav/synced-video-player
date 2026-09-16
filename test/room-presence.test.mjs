@@ -32,7 +32,8 @@ test('home observers are not occupants; only authenticated active members appear
   h.presence.update(['ABCDEFGH'], null, 'Me')
   await tick()
   const link = h.opened[0]
-  assert.equal(link.config.appId, 'test-room-presence')
+  assert.equal(link.config.appId, 'test')
+  assert.equal(link.code, 'presence:ABCDEFGH')
   assert.equal(link.sent[0].message.inRoom, false)
   h.message(link, 'unverified')
   assert.deepEqual(h.presence.list('ABCDEFGH').members, [])

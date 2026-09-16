@@ -70,6 +70,8 @@ npm start        # bundle the renderer and launch the app
 npm test         # unit tests (node:test)
 npm run test:startup # isolated Electron checks for stalled networking and concurrent app profiles
 npm run test:network # three local WebRTC peers: friends, rooms, media, controls and rejoining
+npm run test:discovery # public Nostr discovery: different startup orders, friends, rooms and rejoining
+npm run test:connections # friends can join rooms while discovery is unavailable (release gate)
 npm run dist:win # Windows installer in dist/
 npm run dist:mac # Mac .dmg in dist/ (must run on a Mac)
 ```
