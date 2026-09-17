@@ -2068,8 +2068,10 @@ function render() {
   renderPeople()
   renderPlaylist()
   const resume = role === 'idle' ? resumeItem() : null
-  ui.resumeRoom.hidden = !resume
-  if (resume) ui.resumeRoom.textContent = `Resume from ${formatTime(session.playlist.progress.get(resume.id)?.completed ? 0 : session.playlist.progress.get(resume.id)?.time || 0)}`
+  const resumeProgress = resume && session.playlist.progress.get(resume.id)
+  const resumeTime = resumeProgress?.completed ? 0 : resumeProgress?.time || 0
+  ui.resumeRoom.hidden = !resume || resumeTime < 1
+  if (!ui.resumeRoom.hidden) ui.resumeRoom.textContent = `Resume from ${formatTime(resumeTime)}`
   sampleTabTone()
   syncBoardLayout()
   syncPresence()
