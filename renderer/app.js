@@ -186,6 +186,7 @@ const ui = {
   roomNameForm: $('room-name-form'),
   roomName: $('room-name'),
   boardToggle: $('board-toggle'),
+  boardVisibility: $('board-visibility'),
   board: $('board'),
   pen: $('pen'),
   swatches: $('swatches'),
@@ -1531,7 +1532,7 @@ function receiveBoard(message, peerId) {
     const stroke = addStrokeChunk(session.board, message)
     if (!stroke) return
     syncBoardLayout(true)
-    if (!boardOpen()) ui.boardToggle.classList.add('activity')
+    if (!boardOpen() && !ui.room.classList.contains('board-visible')) ui.boardToggle.classList.add('activity')
   } else if (message?.type === 'clear') {
     clearBoard(session.board, message.at)
     syncBoardLayout(true)
@@ -1575,7 +1576,9 @@ function clearBoardForEveryone() {
 }
 
 function setBoardOpen(open) {
+  endStroke()
   ui.room.classList.toggle('board-open', open)
+  ui.boardToggle.setAttribute('aria-pressed', String(open))
   if (open) ui.boardToggle.classList.remove('activity')
   renderTools()
 }
@@ -2174,6 +2177,11 @@ ui.leave.addEventListener('click', leaveRoom)
 ui.resumeRoom.addEventListener('click', () => { const item = resumeItem(); if (item) playItem(item.id) })
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
+ui.boardVisibility.addEventListener('click', () => {
+  const visible = ui.room.classList.toggle('board-visible')
+  ui.boardVisibility.setAttribute('aria-pressed', String(visible))
+  if (visible) ui.boardToggle.classList.remove('activity')
+})
 for (const [button, tool] of [[ui.pen, 'pen'], [ui.eraser, 'eraser']]) {
   button.addEventListener('click', () => {
     tools.tool = tools.tool === tool ? null : tool
