@@ -317,10 +317,31 @@ function renderSavedRooms() {
       element('span', 'saved-room-members hint'))
     if (current) open.append(element('span', 'hint', `${current.title} · ${progress?.completed ? 'Finished' : formatTime(progress?.time || 0)}`))
     open.addEventListener('click', () => enterRoom(saved.code, {joining: false}))
-    row.append(open)
+    const leave = element('button', 'saved-room-leave ghost', '×')
+    const roomName = saved.details?.name || 'this room'
+    leave.title = `Leave ${roomName}`
+    leave.setAttribute('aria-label', `Leave ${roomName}`)
+    leave.addEventListener('click', () => leaveSavedRoom(saved.code, roomName))
+    row.append(open, leave)
     return row
   }))
   renderRoomMembers()
+}
+
+function leaveSavedRoom(code, roomName) {
+  const {members} = roomPresence.list(code)
+  const detail = members.length
+    ? 'Other people can keep using it, but its saved playlist and progress will be removed from this device.'
+    : 'Its saved playlist and progress will be removed from this device. If you are the last member, the room will be gone.'
+  if (!confirm(`Are you sure you want to leave ${roomName}?\n\n${detail}`)) return
+  try {
+    roomHistory.remove(code)
+    ui.roomSaveError.hidden = true
+    updateRoomPresence()
+    renderSavedRooms()
+  } catch {
+    ui.roomSaveError.hidden = false
+  }
 }
 
 function renderRoomMembers() {

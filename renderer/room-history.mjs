@@ -51,4 +51,10 @@ export class RoomHistory {
     const codes = this.codes()
     if (!codes.includes(code)) this.storage.setItem(`${this.prefix}index`, JSON.stringify([...codes, code]))
   }
+
+  remove(code) {
+    if (!validCode(code)) throw new Error('Invalid room code')
+    this.storage.setItem(`${this.prefix}index`, JSON.stringify(this.codes().filter((saved) => saved !== code)))
+    this.storage.removeItem(this.prefix + code)
+  }
 }

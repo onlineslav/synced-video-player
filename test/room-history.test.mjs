@@ -5,7 +5,11 @@ import {addItem, createPlaylist, mergePlaylist, moveItem, orderedItems, playlist
 
 const storage = () => {
   const values = new Map()
-  return {getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value)}
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  }
 }
 const checkpoint = (fields = {}) => ({id: 'a', position: 1, time: 45, duration: 120, completed: false, loop: false, claimedAt: 3, hostId: 'connection-old', sequence: 10, ...fields})
 const room = () => {
@@ -88,4 +92,19 @@ test('progress rejects malformed values and preserves completion and removed cur
 test('storage failures are reported to the caller instead of silently claiming the room was saved', () => {
   const disk = {getItem: () => null, setItem: () => { throw new Error('disk full') }}
   assert.throws(() => new RoomHistory(disk, 'alice#1234-5678').save(room()), /disk full/)
+})
+
+test('leaving a saved room removes its history without affecting other rooms', () => {
+  const disk = storage(), history = new RoomHistory(disk, 'alice#1234-5678')
+  const first = room()
+  const second = {...room(), code: 'OTHER123'}
+  history.save(first)
+  history.save(second)
+
+  history.remove(first.code)
+
+  assert.equal(history.load(first.code), null)
+  assert.deepEqual(history.codes(), [second.code])
+  assert.equal(history.load(second.code).details.name, 'Movie night')
+  assert.throws(() => history.remove('not-a-code'), /Invalid room code/)
 })
