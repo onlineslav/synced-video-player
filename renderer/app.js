@@ -2540,8 +2540,14 @@ ui.newUsername.addEventListener('click', () => showWelcome('change'))
 
 for (const button of ui.openButtons) {
   button.addEventListener('click', async () => {
-    const filePath = await window.api.chooseMedia()
-    if (filePath) hostFile(filePath)
+    const current = session
+    const filePaths = await window.api.chooseMediaFiles()
+    if (session !== current || current.closed || !filePaths.length) return
+    const items = addToPlaylist(filePaths)
+    if (items.length) {
+      if (items.length > 1) setPlaylistOpen(true)
+      hostFile(session.ownFiles.get(items[0].id), items[0])
+    }
   })
 }
 
