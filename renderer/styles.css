@@ -831,12 +831,12 @@ button:disabled {
   content: '';
   position: absolute;
   top: var(--playlist-hover-y, 50%);
-  height: 140px;
+  height: 240px;
   transform: translateY(-50%);
   left: 4px;
   width: 2px;
   background: linear-gradient(transparent, var(--accent), transparent);
-  filter: drop-shadow(0 0 4px var(--accent));
+  filter: drop-shadow(0 0 8px var(--accent)) drop-shadow(0 0 16px var(--accent));
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s;
@@ -844,7 +844,7 @@ button:disabled {
 
 .playlist-edge:hover::after,
 .room.resizing .playlist-edge::after {
-  opacity: 0.35;
+  opacity: 0.7;
 }
 
 .room:not(.playlist-open) .playlist-edge {
