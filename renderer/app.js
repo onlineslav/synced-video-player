@@ -2070,7 +2070,7 @@ function render() {
   const resume = role === 'idle' ? resumeItem() : null
   const resumeProgress = resume && session.playlist.progress.get(resume.id)
   const resumeTime = resumeProgress?.completed ? 0 : resumeProgress?.time || 0
-  ui.resumeRoom.hidden = !resume || resumeTime < 1
+  ui.resumeRoom.hidden = !resume || resumeTime < 1 || (resumeProgress?.duration || 0) < 15
   if (!ui.resumeRoom.hidden) ui.resumeRoom.textContent = `Resume from ${formatTime(resumeTime)}`
   sampleTabTone()
   syncBoardLayout()
