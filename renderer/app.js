@@ -2285,6 +2285,9 @@ ui.playlistTab.addEventListener('click', () => {
   if (tabDragged) tabDragged = false
   else setPlaylistOpen(!playlistOpen())
 })
+ui.playlistEdge.addEventListener('dblclick', () => {
+  if (!tabDragged && playlistOpen()) setPlaylistOpen(false)
+})
 window.addEventListener('resize', () => {
   if (playlistOpen() && !tabDrag) showPlaylistWidth(fittedPlaylistWidth())
 })
