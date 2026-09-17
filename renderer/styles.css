@@ -75,12 +75,32 @@ button.ghost {
 
 .saved-rooms h2 { font-size: 18px; margin-bottom: 6px; }
 .saved-room-items { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
-.saved-room { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: stretch; }
-.saved-room-open { width: 100%; display: grid; gap: 5px; text-align: left; padding: 14px; white-space: normal; }
+.saved-room { position: relative; }
+.saved-room-open { width: 100%; display: grid; gap: 5px; text-align: left; padding: 14px 52px 14px 14px; white-space: normal; }
 .saved-room-open strong, .saved-room-open span { overflow-wrap: anywhere; }
-.saved-room-leave { align-self: center; color: var(--muted); font-size: 22px; line-height: 1; padding: 9px 12px; }
-.saved-room-leave:hover, .saved-room-leave:focus-visible { color: var(--danger); border-color: var(--danger); }
+.saved-room-leave { position: absolute; top: 8px; right: 8px; border: 0; color: var(--muted); font-size: 22px; line-height: 1; padding: 6px 9px; }
+.saved-room-leave:hover, .saved-room-leave:focus-visible { color: var(--danger); }
+.saved-room-leave:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #resume-room { max-width: 100%; white-space: normal; }
+
+.leave-room-dialog {
+  width: min(400px, calc(100% - 40px));
+  padding: 26px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+.leave-room-dialog::backdrop { background: rgba(5, 5, 8, 0.72); backdrop-filter: blur(5px); }
+.leave-room-dialog h2 { margin: 0; font-size: 21px; }
+.leave-room-name { margin: 10px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+#leave-room-description { margin: 12px 0 24px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.leave-room-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.leave-room-actions button { padding: 9px 16px; }
+.leave-room-confirm { background: var(--danger); border-color: var(--danger); color: var(--bg); font-weight: 600; }
+.leave-room-confirm:hover { background: #ff8585; border-color: #ff8585; }
+.leave-room-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .home {
   height: 100%;

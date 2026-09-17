@@ -328,17 +328,22 @@ function renderSavedRooms() {
   renderRoomMembers()
 }
 
-function leaveSavedRoom(code, roomName) {
-  const {members} = roomPresence.list(code)
-  const detail = members.length
-    ? 'Other people can keep using it, but its saved playlist and progress will be removed from this device.'
-    : 'Its saved playlist and progress will be removed from this device. If you are the last member, the room will be gone.'
-  if (!confirm(`Are you sure you want to leave ${roomName}?\n\n${detail}`)) return
+async function leaveSavedRoom(code, roomName) {
+  const dialog = $('leave-room-dialog')
+  if (dialog.open) return
+  const history = roomHistory
+  $('leave-room-name').textContent = roomName
+  dialog.returnValue = 'cancel'
+  const answer = new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue), {once: true}))
+  dialog.showModal()
+  if (await answer !== 'leave' || roomHistory !== history || session.code === code) return
   try {
     roomHistory.remove(code)
     ui.roomSaveError.hidden = true
     updateRoomPresence()
     renderSavedRooms()
+    const nextButton = ui.savedRoomItems.querySelector('.saved-room-leave') || ui.create
+    nextButton.focus()
   } catch {
     ui.roomSaveError.hidden = false
   }

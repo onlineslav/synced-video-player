@@ -98,6 +98,18 @@
       </div>
     </main>
 
+    <dialog id="leave-room-dialog" class="leave-room-dialog" aria-labelledby="leave-room-title" aria-describedby="leave-room-description">
+      <form method="dialog">
+        <h2 id="leave-room-title">Leave room?</h2>
+        <p id="leave-room-name" class="leave-room-name"></p>
+        <p id="leave-room-description">Are you sure? This removes the room and its saved progress from your home screen. Other members can keep using it.</p>
+        <div class="leave-room-actions">
+          <button value="cancel" autofocus>Cancel</button>
+          <button value="leave" class="leave-room-confirm">Leave room</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="settings" class="modal" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header class="modal-header">
