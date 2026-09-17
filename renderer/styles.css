@@ -831,12 +831,12 @@ button:disabled {
   content: '';
   position: absolute;
   top: var(--playlist-hover-y, 50%);
-  height: 600px;
+  height: 720px;
   transform: translateY(-50%);
   left: 4px;
   width: 2px;
   background: linear-gradient(transparent, var(--accent), transparent);
-  filter: drop-shadow(0 0 3px var(--accent));
+  filter: drop-shadow(0 0 2px var(--accent));
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s;
