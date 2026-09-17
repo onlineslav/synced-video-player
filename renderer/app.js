@@ -178,6 +178,7 @@ const ui = {
   linkWarning: $('link-warning'),
   linkWarningTip: $('link-warning-tip'),
   title: $('title'),
+  pausedTitle: $('paused-title'),
   role: $('role'),
   peopleToggle: $('people-toggle'),
   peopleCount: $('people-count'),
@@ -2051,7 +2052,7 @@ function render() {
   renderPlaylist()
   const resume = role === 'idle' ? resumeItem() : null
   ui.resumeRoom.hidden = !resume
-  if (resume) ui.resumeRoom.textContent = `Resume ${resume.title} · ${formatTime(session.playlist.progress.get(resume.id)?.completed ? 0 : session.playlist.progress.get(resume.id)?.time || 0)}`
+  if (resume) ui.resumeRoom.textContent = `Resume from ${formatTime(session.playlist.progress.get(resume.id)?.completed ? 0 : session.playlist.progress.get(resume.id)?.time || 0)}`
   sampleTabTone()
   syncBoardLayout()
   syncPresence()
@@ -2072,6 +2073,8 @@ function render() {
 
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
+  ui.pausedTitle.textContent = ui.title.textContent || resume?.title || ''
+  ui.pausedTitle.hidden = !ui.pausedTitle.textContent || imageMode || !(resume || (ready && !isPlaying()))
   const receivingImage = role === 'viewer' && imageMode && !image
   if (receivingImage && performance.now() - session.imageRetryAt > 15_000) {
     session.imageRetryAt = performance.now()

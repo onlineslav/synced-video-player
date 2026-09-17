@@ -1510,6 +1510,21 @@ button:disabled {
   display: none;
 }
 
+.paused-title {
+  position: absolute;
+  top: 72px;
+  left: 28px;
+  right: 28px;
+  z-index: 1;
+  color: #fff;
+  font-size: clamp(20px, 3cqw, 36px);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  text-shadow: 0 2px 8px #000, 0 0 24px #000;
+  pointer-events: none;
+}
+
 .stage[data-role='host'] video.local,
 .stage[data-role='viewer'] video.remote {
   display: block;
