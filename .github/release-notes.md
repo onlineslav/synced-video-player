@@ -1,10 +1,12 @@
-## What's new in 0.4.1
+## What's new in 0.4.2
 
-**Everyone needs 0.4.1 to connect to rooms together.** Windows installs the update automatically; on a Mac, use the download button on the home screen.
+Windows installs the update automatically; on a Mac, use the download button on the home screen.
 
-- **Room joining fixed:** friends, rooms and saved-room presence share an established connection again. This restores the reliable behavior from 0.3 when public discovery is delayed or unavailable.
-- **Reliable reconnecting:** leaving and rejoining a room continues to work through the existing friend connection.
-- **Version shown on Home:** the installed version now appears in the lower-left corner, making it easy to confirm both people are up to date.
+- **Open multiple files:** select several files with Open media to add them to the playlist together.
+- **Cleaner resume controls:** resume shows the saved timestamp, with no prompt at the start of a file or for media shorter than 15 seconds.
+- **Paused media title:** the filename appears over the player while paused and becomes more visible on hover.
+- **Playlist improvements:** removing the active item stops playback, double-clicking the resize edge hides the playlist, and the edge has an updated hover glow.
+- **Leave saved rooms:** remove a saved room from Home using its leave control and confirmation dialog.
 
 ## Download
 
