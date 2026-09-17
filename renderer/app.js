@@ -2235,6 +2235,11 @@ try {
 }
 
 for (const handle of [ui.playlistTab, ui.playlistEdge]) {
+  const trackPlaylistHover = (event) => {
+    const y = event.clientY - ui.playlist.getBoundingClientRect().top
+    ui.playlist.style.setProperty('--playlist-hover-y', `${y}px`)
+  }
+  handle.addEventListener('pointerenter', trackPlaylistHover)
   handle.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return
     event.preventDefault() // no text selection while dragging the edge
@@ -2243,6 +2248,7 @@ for (const handle of [ui.playlistTab, ui.playlistEdge]) {
     tabDrag = {startX: event.clientX, startWidth: playlistOpen() ? fittedPlaylistWidth() : 0, width: null}
   })
   handle.addEventListener('pointermove', (event) => {
+    trackPlaylistHover(event)
     if (!tabDrag) return
     const dx = event.clientX - tabDrag.startX
     if (tabDrag.width == null && Math.abs(dx) < 4) return // still a click
