@@ -1040,6 +1040,7 @@ function receiveState(value, peerId) {
   for (const [id, receiver] of Object.entries(state.viewers)) if (session.peers.has(id)) person(id).receiver = receiver
   session.role = 'viewer'
   ui.stage.dataset.role = 'viewer'
+  if (stopRemovedPlayback()) return
   if (state.ended || state.image) detachRemoteStream()
   else attachRemoteStream()
   render()
@@ -1618,10 +1619,24 @@ function removeFromPlaylist(id) {
   removeItem(session.playlist, id)
   session.ownFiles.delete(id)
   session.availableFiles.delete(id)
+  stopRemovedPlayback()
   session.playlistAction?.send({type: 'remove', id}).catch(() => {})
   saveRoom()
   shareAvailability()
   render()
+}
+
+// Tombstones also cover removals learned from snapshots and delayed host states.
+function stopRemovedPlayback() {
+  const id = isHost() ? session.playing?.id : session.remote?.playlistId
+  if (!id || !session.playlist.removed.has(id)) return false
+  session.remote = null
+  session.hostId = null
+  session.mediaError = null
+  session.role = 'idle'
+  detachRemoteStream()
+  stopHosting()
+  return true
 }
 
 // Moves item `id` to `index` among the other items, for everyone.
@@ -1652,6 +1667,7 @@ function receivePlaylist(message, peerId) {
       session.availableFiles.delete(id)
     }
     if (session.role === 'idle') session.loop = session.playlist.current?.loop || false
+    stopRemovedPlayback()
     if (isHost()) broadcastState()
   }
   else if (message?.type === 'availability') {
@@ -1659,6 +1675,7 @@ function receivePlaylist(message, peerId) {
     session.peerFiles.set(peerId, new Set(message.ids.filter((id) => typeof id === 'string' && id.length <= 100)))
   }
   else if (message?.type === 'play') playItem(message.id, peerId)
+  stopRemovedPlayback()
   saveRoom()
   render()
 }
