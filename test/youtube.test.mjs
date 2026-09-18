@@ -1,11 +1,22 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {parseYouTubeUrl} from '../shared/youtube.mjs'
+import {parseYouTubeUrl, droppedYouTubeUrl} from '../shared/youtube.mjs'
 import {createPlaylist, addItem, orderedItems, mergePlaylist, playlistSnapshot} from '../renderer/playlist.mjs'
 import {RoomHistory} from '../renderer/room-history.mjs'
 
 const video = 'M7lc1UVf-VE'
 const list = 'PLBCF2DAC6FFB574DE'
+
+test('URL drops handle browser link formats without interpreting HTML or importing arbitrary sources', () => {
+  const url = `https://youtube.com/watch?v=${video}`
+  assert.equal(droppedYouTubeUrl({uriList: `# Dragged link\r\n${url}\r\n`, text: 'Video title'}), url)
+  assert.equal(droppedYouTubeUrl({mozUrl: `${url}\nVideo title`}), url)
+  assert.equal(droppedYouTubeUrl({text: `  ${url}  `}), url)
+  assert.equal(droppedYouTubeUrl({text: `https://youtube.com/playlist?list=${list}`}), `https://youtube.com/playlist?list=${list}`)
+  for (const text of ['', '<a href="https://youtube.com">Video</a>', 'https://example.com/video', 'javascript:alert(1)']) {
+    assert.throws(() => droppedYouTubeUrl({text}))
+  }
+})
 
 test('YouTube URLs accept supported hosts and video forms, preferring full playlists', () => {
   for (const url of [`https://youtu.be/${video}?si=share`, `https://www.youtube.com/watch?v=${video}`,

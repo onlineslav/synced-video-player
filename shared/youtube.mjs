@@ -17,3 +17,13 @@ export function parseYouTubeUrl(value) {
   if (!playlistId && !isYouTubeId(videoId)) throw new Error('Enter a YouTube video or playlist URL.')
   return {videoId: isYouTubeId(videoId) ? videoId : null, playlistId: playlistId || null}
 }
+
+// Browsers drag links as URI lists; selected address-bar text uses plain text.
+// Firefox can supply a URL followed by a title in its own drag format.
+export function droppedYouTubeUrl({uriList = '', text = '', mozUrl = ''} = {}) {
+  const value = [uriList, mozUrl, text].find((entry) => typeof entry === 'string' && entry.trim()) || ''
+  const url = value.split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith('#'))
+  if (!url) throw new Error('Drop a YouTube video or playlist link here.')
+  parseYouTubeUrl(url)
+  return url
+}

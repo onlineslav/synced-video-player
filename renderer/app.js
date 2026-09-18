@@ -18,7 +18,7 @@ import {
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
 import {YouTubePlayer} from './youtube.mjs'
-import {parseYouTubeUrl} from '../shared/youtube.mjs'
+import {parseYouTubeUrl, droppedYouTubeUrl} from '../shared/youtube.mjs'
 import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
@@ -2484,9 +2484,10 @@ ui.playlistItems.addEventListener('pointermove', (event) => {
 ui.playlistItems.addEventListener('pointerup', () => endItemDrag(true))
 ui.playlistItems.addEventListener('pointercancel', () => endItemDrag(false))
 ui.playlistItems.addEventListener('lostpointercapture', () => endItemDrag(false))
-// Dropping files on the playlist, or on its tab while it's closed, adds them all.
+// Files and YouTube links dropped on the playlist (or its closed tab) join the queue.
 ui.playlist.addEventListener('dragover', (event) => {
   event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
   ui.playlist.classList.add('dropping')
   if (!playlistOpen()) setPlaylistOpen(true)
 })
@@ -2496,7 +2497,18 @@ ui.playlist.addEventListener('dragleave', (event) => {
 ui.playlist.addEventListener('drop', (event) => {
   event.preventDefault()
   ui.playlist.classList.remove('dropping')
-  addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)).filter(Boolean))
+  if (event.dataTransfer.files.length) {
+    addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)).filter(Boolean))
+    return
+  }
+  if (importingYouTube) return toast('A YouTube import is already in progress. Try again when it finishes.')
+  try {
+    const url = droppedYouTubeUrl({uriList: event.dataTransfer.getData('text/uri-list'),
+      text: event.dataTransfer.getData('text/plain'), mozUrl: event.dataTransfer.getData('text/x-moz-url')})
+    setPlaylistAddOpen(true)
+    ui.playlistUrlForm.querySelector('input').value = url
+    importYouTube(ui.playlistUrlForm, {play: false})
+  } catch (error) { toast(errorMessage(error), true) }
 })
 
 // The display name picked on the welcome screen, or changed since.
