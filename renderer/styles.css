@@ -81,7 +81,6 @@ button.ghost {
 .saved-room-leave { position: absolute; top: 8px; right: 8px; border: 0; color: var(--muted); font-size: 22px; line-height: 1; padding: 6px 9px; }
 .saved-room-leave:hover, .saved-room-leave:focus-visible { color: var(--danger); }
 .saved-room-leave:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#resume-room { max-width: 100%; white-space: normal; }
 
 .leave-room-dialog {
   width: min(400px, calc(100% - 40px));
@@ -1782,6 +1781,10 @@ button:disabled {
 .stage[data-role='idle'] .empty,
 .stage.waiting .empty {
   display: flex;
+}
+
+.stage.has-playlist .empty > :not(#empty-text) {
+  display: none;
 }
 
 .audio-only {

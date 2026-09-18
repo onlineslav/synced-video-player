@@ -141,7 +141,6 @@ const ui = {
   savedRooms: $('saved-rooms'),
   savedRoomItems: $('saved-room-items'),
   roomSaveError: $('room-save-error'),
-  resumeRoom: $('resume-room'),
   profileAvatar: $('profile-avatar'),
   profileName: $('profile-name'),
   username: $('username'),
@@ -335,13 +334,16 @@ function rememberObservedPlayback() {
 
 function restoreObservedPlayback() {
   const saved = session.restorePending
-  if (!saved || session.closed || session.role !== 'idle' || session.authority) return
-  const item = session.playlist.items.get(saved.id)
-  if (!item) { session.restorePending = null; return }
+  if (session.closed || session.role !== 'idle' || session.authority) return
+  const local = (item) => item && (item.youtubeId || (item.owner === identity.username && session.availableFiles.has(item.id)))
+  const observed = session.playlist.items.get(saved?.id)
+  const item = local(observed) ? observed : [resumeItem(), ...orderedItems(session.playlist)].find(local)
+  if (!item) return
+  const start = item.id === saved?.id ? saved.time : undefined
   // A local preview cannot retrieve another person's file or command their player.
-  if (item.youtubeId) hostYouTube(item, {preview: true, start: saved.time})
+  if (item.youtubeId) hostYouTube(item, {preview: true, start})
   else if (item.owner === identity.username && session.availableFiles.has(item.id)) {
-    hostFile(session.ownFiles.get(item.id), item, {preview: true, start: saved.time})
+    hostFile(session.ownFiles.get(item.id), item, {preview: true, start})
   }
 }
 
@@ -1752,12 +1754,19 @@ function removeFromPlaylist(id) {
 function stopRemovedPlayback() {
   const id = isHost() ? session.playing?.id : session.remote?.playlistId
   if (!id || !session.playlist.removed.has(id)) return false
+  const advance = isHost()
+  const options = {autoplay: isPlaying(), preview: Boolean(session.preview)}
+  const cursor = session.playing || session.playlist.current
+  const remaining = orderedItems(session.playlist).filter(playable)
+  const next = nextItem(session.playlist, cursor, playable) || remaining.at(-1)
   session.remote = null
   session.hostId = null
   session.mediaError = null
   session.role = 'idle'
   detachRemoteStream()
   stopHosting()
+  // Only the host advances; viewers follow its replacement claim.
+  if (advance && next) playItem(next.id, null, options)
   return true
 }
 
@@ -1796,7 +1805,7 @@ function receivePlaylist(message, peerId) {
     if (!Array.isArray(message.ids) || message.ids.length > 500) return
     session.peerFiles.set(peerId, new Set(message.ids.filter((id) => typeof id === 'string' && id.length <= 100)))
   }
-  else if (message?.type === 'play') playItem(message.id, peerId)
+  else if (message?.type === 'play') playItem(message.id, peerId, {autoplay: message.autoplay !== false})
   stopRemovedPlayback()
   saveRoom()
   render()
@@ -1832,10 +1841,10 @@ async function refreshAvailability() {
 }
 
 // Plays an item for everyone. `from` is the peer who asked, when the request came from someone else.
-async function playItem(id, from = null) {
+async function playItem(id, from = null, {autoplay = true, preview = false} = {}) {
   const item = session.playlist.items.get(id)
   if (!item) return
-  if (item.youtubeId) return hostYouTube(item)
+  if (item.youtubeId) return hostYouTube(item, {autoplay, preview})
   if (item.owner === identity.username) {
     const current = session
     const filePath = session.ownFiles.get(id)
@@ -1845,10 +1854,10 @@ async function playItem(id, from = null) {
       if (session === current && !current.closed) toast('Could not check this media file. Try again.', true)
       return
     }
-    if (session !== current || current.closed || current.ownFiles.get(id) !== filePath) return
+    if (session !== current || current.closed || current.ownFiles.get(id) !== filePath || !current.playlist.items.has(id)) return
     if (available) {
       current.availableFiles.add(id)
-      return hostFile(filePath, item)
+      return hostFile(filePath, item, {autoplay, preview})
     }
     current.availableFiles.delete(id)
     shareAvailability()
@@ -1858,7 +1867,7 @@ async function playItem(id, from = null) {
   } else if (from == null) {
     // Only the owner's app has the file, so it hosts; nobody relays requests for someone else's.
     if (!playable(item)) return toast(`${item.title} is unavailable`, true)
-    session.playlistAction.send({type: 'play', id}, {target: ownerPeer(item)}).catch(() => {})
+    session.playlistAction.send({type: 'play', id, autoplay}, {target: ownerPeer(item)}).catch(() => {})
   }
 }
 
@@ -2193,10 +2202,7 @@ function render() {
   renderPeople()
   renderPlaylist()
   const resume = role === 'idle' ? resumeItem() : null
-  const resumeProgress = resume && session.playlist.progress.get(resume.id)
-  const resumeTime = resumeProgress?.completed ? 0 : resumeProgress?.time || 0
-  ui.resumeRoom.hidden = !resume || resumeTime < 1 || (resumeProgress?.duration || 0) < 15
-  if (!ui.resumeRoom.hidden) ui.resumeRoom.textContent = `Resume from ${formatTime(resumeTime)}`
+  ui.stage.classList.toggle('has-playlist', session.playlist.items.size > 0)
   sampleTabTone()
   syncBoardLayout()
   syncPresence()
@@ -2300,7 +2306,6 @@ ui.code.addEventListener('click', async () => {
 })
 
 ui.leave.addEventListener('click', leaveRoom)
-ui.resumeRoom.addEventListener('click', () => { const item = resumeItem(); if (item) playItem(item.id) })
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
 ui.room.classList.add('board-visible')

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import vm from 'node:vm'
-import {createPlaylist, addItem, removeItem, mergePlaylist} from '../renderer/playlist.mjs'
+import {createPlaylist, addItem, removeItem, mergePlaylist, orderedItems, nextItem} from '../renderer/playlist.mjs'
 
 // Exercise the renderer's message handlers with media/network boundaries stubbed.
 const source = readFileSync(new URL('../renderer/app.js', import.meta.url), 'utf8')
@@ -34,9 +34,11 @@ function setup(role = 'host') {
   const session = {role, playlist, playing: {id: 'playing'}, remote: role === 'viewer' ? {playlistId: 'playing'} : null,
     ownFiles: new Map(), availableFiles: new Set(), identities: new Map([['peer', 'owner']]), peers: new Set(['peer']),
     claimedAt: 1, imageTransfers: new Map(), captions: {}, openingMedia: true}
-  const calls = {closed: 0, detached: 0, unpublished: 0, sent: []}
+  const calls = {closed: 0, detached: 0, unpublished: 0, sent: [], played: []}
   session.playlistAction = {send: (message) => { calls.sent.push(message); return Promise.resolve() }}
   const context = vm.createContext({session, removeItem, mergePlaylist, identity: {username: 'self'},
+    orderedItems, nextItem, playable: () => true, isPlaying: () => Boolean(session.testPlaying),
+    playItem: (...args) => calls.played.push(args),
     youtube: {close: () => {}},
     isHost: () => session.role === 'host', player: {close: () => calls.closed++},
     detachRemoteStream: () => calls.detached++, unpublishStream: () => calls.unpublished++, clearHostImage: () => {},
@@ -71,6 +73,55 @@ test('Removing another item leaves current playback running', () => {
   context.removeFromPlaylist('other')
   assert.equal(session.role, 'host')
   assert.equal(calls.closed, 0)
+  assert.equal(calls.played.length, 0)
+})
+
+for (const playing of [false, true]) test(`Removing current media selects next/previous and preserves playing=${playing}`, () => {
+  for (const position of [0, 2]) {
+    const {session, calls, context} = setup()
+    session.playing.position = position
+    session.testPlaying = playing
+    context.removeFromPlaylist('playing')
+    assert.equal(calls.played[0][0], 'other')
+    assert.equal(calls.played[0][2].autoplay, playing)
+  }
+})
+
+test('Viewers do not compete with the host to advance; deleting the final item stops playback', () => {
+  const viewer = setup('viewer')
+  viewer.context.removeFromPlaylist('playing')
+  assert.equal(viewer.calls.played.length, 0)
+  const host = setup()
+  host.context.removeFromPlaylist('other')
+  host.context.removeFromPlaylist('playing')
+  assert.equal(host.calls.played.length, 0)
+})
+
+test('Replacement playback forwards pause state to a remote file owner', async () => {
+  const {session, calls, context} = setup()
+  context.ownerPeer = () => 'peer'
+  vm.runInContext(source.match(/^async function playItem\([^]*?^}/m)[0], context)
+  await context.playItem('other', null, {autoplay: false})
+  assert.deepEqual({...calls.sent[0]}, {type: 'play', id: 'other', autoplay: false})
+})
+
+test('Local and YouTube replacements resume stored progress instead of forcing zero', async () => {
+  const {session, context} = setup()
+  session.playlist.items.get('other').owner = 'self'
+  session.ownFiles.set('other', 'movie.mp4')
+  context.window = {api: {availableFiles: async () => [true]}}
+  const opened = []
+  context.hostFile = (path, item, options) => opened.push(options)
+  context.hostYouTube = (item, options) => opened.push(options)
+  vm.runInContext(source.match(/^async function playItem\([^]*?^}/m)[0], context)
+  await context.playItem('other', null, {autoplay: false})
+  session.playlist.items.get('other').youtubeId = 'M7lc1UVf-VE'
+  await context.playItem('other', null, {autoplay: false})
+  for (const options of opened) {
+    assert.equal(options.autoplay, false)
+    assert.equal(options.start, undefined)
+  }
+  assert.equal(opened.length, 2)
 })
 
 for (const message of [{type: 'remove', id: 'playing'}, {type: 'sync', removed: ['playing']}]) {
