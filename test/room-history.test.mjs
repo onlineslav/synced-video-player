@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {RoomHistory} from '../renderer/room-history.mjs'
+import {RoomHistory, cleanObserved} from '../renderer/room-history.mjs'
 import {addItem, createPlaylist, mergePlaylist, moveItem, orderedItems, playlistSnapshot, recordProgress, removeItem} from '../renderer/playlist.mjs'
 
 const storage = () => {
@@ -22,6 +22,24 @@ const room = () => {
   return {code: 'ABCDEFGH', details: {name: 'Movie night', revision: 2, updatedBy: 'peer'}, playlist,
     ownFiles: new Map([['a', 'C:/private/a.mp4']]), claimedAt: 4}
 }
+
+test('personal observed positions survive restart without changing shared host checkpoints', () => {
+  const disk = storage(), original = room()
+  original.observed = {id: 'a', time: 48.25, duration: 120}
+  const history = new RoomHistory(disk, 'alice#1234-5678')
+  history.save(original)
+  const restored = history.load(original.code)
+  assert.deepEqual(restored.observed, original.observed)
+  assert.equal(restored.playlist.progress.get('a').time, 45)
+  assert.equal(restored.playlist.current.id, 'b')
+  assert.equal('observed' in playlistSnapshot(restored.playlist), false)
+  for (const value of [{id:'missing', time:1, duration:120}, {id:'a', time:-1, duration:120}, {id:'a', time:NaN, duration:120}]) {
+    assert.equal(cleanObserved(value, original.playlist), null)
+  }
+  removeItem(original.playlist, 'a')
+  history.save(original)
+  assert.equal(history.load(original.code).observed, null)
+})
 
 test('restarting restores room name, ordered playlist, per-item progress and only local file ownership', () => {
   const disk = storage(), original = room()

@@ -253,6 +253,9 @@ const blankSession = () => ({
   peerFiles: new Map(),
   identities: new Map(),
   openingMedia: false,
+  preview: false, // a restored, paused local view; never claims the room until Play
+  observed: null,
+  restorePending: null,
   catalog: new SubtitleCatalog(),
   authority: null,
   sequence: 0,
@@ -309,6 +312,7 @@ let roomHistory = null
 
 function saveRoom() {
   if (!session.code || !roomHistory) return
+  rememberObservedPlayback()
   try {
     roomHistory.save(session)
     ui.roomSaveError.hidden = true
@@ -317,6 +321,39 @@ function saveRoom() {
     if (!session.saveErrorShown) toast('Could not save this room on this device.', true)
     session.saveErrorShown = true
   }
+}
+
+function rememberObservedPlayback() {
+  const id = isHost() ? session.playing?.id : session.remote?.playlistId
+  if (!id || !session.playlist.items.has(id) || session.openingMedia || session.mediaError ||
+      (isHost() ? !player.loaded && !youtube.loaded && !session.image : !session.remote || session.remote.loading || session.remote.ended)) return
+  const duration = currentDuration()
+  if (youtube.videoId && !youtube.duration) return // the embed has not cued the saved position yet
+  const time = youtube.videoId ? youtube.time : currentTime()
+  session.observed = {id, time: Math.max(0, Math.min(time, duration || time)), duration}
+}
+
+function restoreObservedPlayback() {
+  const saved = session.restorePending
+  if (!saved || session.closed || session.role !== 'idle' || session.authority) return
+  const item = session.playlist.items.get(saved.id)
+  if (!item) { session.restorePending = null; return }
+  // A local preview cannot retrieve another person's file or command their player.
+  if (item.youtubeId) hostYouTube(item, {preview: true, start: saved.time})
+  else if (item.owner === identity.username && session.availableFiles.has(item.id)) {
+    hostFile(session.ownFiles.get(item.id), item, {preview: true, start: saved.time})
+  }
+}
+
+function activatePreview() {
+  if (!session.preview || session.closed) return
+  session.preview = false
+  session.claimedAt = nextRevision(session.claimedAt, session.playlist.revision)
+  session.authority = {hostId: selfId, claimedAt: session.claimedAt, sequence: 0}
+  session.sequence = 0
+  if (session.image) { session.image.id = String(session.claimedAt); sendImage() }
+  else if (player.loaded) publishStream()
+  broadcastState()
 }
 
 function renderSavedRooms() {
@@ -431,7 +468,8 @@ async function openRoom(code, joining) {
   })
   session = {
     ...blankSession(),
-    ...(saved && {playlist: saved.playlist, ownFiles: saved.ownFiles, claimedAt: saved.claimedAt, loop: saved.playlist.current?.loop || false}),
+    ...(saved && {playlist: saved.playlist, ownFiles: saved.ownFiles, claimedAt: saved.claimedAt, loop: saved.playlist.current?.loop || false,
+      observed: saved.observed, restorePending: saved.observed || saved.playlist.current}),
     identities: peerIdentities,
     connection,
     code,
@@ -503,7 +541,7 @@ async function openRoom(code, joining) {
     }
     shareAvailability(peerId)
     toast('Participant connected')
-    if (session.role === 'host') {
+    if (session.role === 'host' && !session.preview) {
       if (session.stream) Promise.all(room.addStream(session.stream, {target: peerId, metadata: {claimedAt: session.claimedAt}})).then(tuneSenders, () => {})
       if (session.image) sendImage(peerId)
       broadcastState(peerId)
@@ -549,7 +587,7 @@ async function openRoom(code, joining) {
 
   session.stateAction.onMessage = limited('state', (state, {peerId}) => receiveState(state, peerId))
   session.commandAction.onMessage = limited('command', (message) => {
-    if (session.role === 'host' && sameClaim(message, {hostId: selfId, claimedAt: session.claimedAt})) applyCommand(message.cmd, message.value)
+    if (session.role === 'host' && !session.preview && sameClaim(message, {hostId: selfId, claimedAt: session.claimedAt})) applyCommand(message.cmd, message.value)
   })
   session.telemetryAction.onMessage = limited('telemetry', (message, {peerId}) => {
     if (!isHost() || !sameClaim(message, {hostId: selfId, claimedAt: session.claimedAt})) return
@@ -630,7 +668,7 @@ function setRole(role) {
 // ---------- Hosting ----------
 
 // `item` is the playlist item this file was started from, if any.
-async function hostFile(filePath, item = null) {
+async function hostFile(filePath, item = null, {preview = false, start} = {}) {
   if (!session.room || session.closed) return
   const current = session
   if (!item) {
@@ -643,6 +681,8 @@ async function hostFile(filePath, item = null) {
   const resume = session.playlist.progress.get(item.id)
   const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt, session.playlist.revision)
   stopHosting()
+  session.preview = preview
+  session.restorePending = null
   session.openingMedia = true
   session.claimedAt = claimedAt
   session.authority = {hostId: selfId, claimedAt, sequence: 0}
@@ -657,10 +697,10 @@ async function hostFile(filePath, item = null) {
   broadcastState()
   if (isImagePath(filePath)) return hostImage(filePath, claimedAt)
   try {
-    const opened = await player.open(filePath, resume?.completed ? 0 : resume?.time || 0)
+    const opened = await player.open(filePath, start ?? (resume?.completed ? 0 : resume?.time || 0))
     if (session !== current || current.closed || current.claimedAt !== claimedAt || !isHost()) return
     current.openingMedia = false
-    if (opened) ui.localVideo.play().catch((error) => {
+    if (opened && !current.preview) ui.localVideo.play().catch((error) => {
       if (session === current && !current.closed && current.claimedAt === claimedAt && isHost()) failHosting(error)
     })
   } catch (err) {
@@ -671,6 +711,7 @@ async function hostFile(filePath, item = null) {
 }
 
 function stopHosting() {
+  session.preview = false
   youtube.close()
   session.imageSend?.abort()
   session.captions.controller?.abort()
@@ -684,13 +725,15 @@ function stopHosting() {
 
 const hostedTitle = () => session.image?.name || youtube.title || (youtube.videoId && session.playlist.items.get(session.playing?.id)?.title) || player.media?.title || player.media?.name || null
 
-function hostYouTube(item) {
+function hostYouTube(item, {preview = false, start} = {}) {
   if (!session.room || session.closed) return
   checkpointPlayback()
   saveRoom()
   const resume = session.playlist.progress.get(item.id)
   const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt, session.playlist.revision)
   stopHosting()
+  session.preview = preview
+  session.restorePending = null
   session.claimedAt = claimedAt
   session.authority = {hostId: selfId, claimedAt, sequence: 0}
   session.sequence = 0
@@ -700,7 +743,7 @@ function hostYouTube(item) {
   session.hostId = selfId
   session.remote = null
   detachRemoteStream()
-  youtube.open(item.youtubeId, resume?.completed ? 0 : resume?.time || 0)
+  youtube.open(item.youtubeId, start ?? (resume?.completed ? 0 : resume?.time || 0), !preview)
   setRole('host')
   broadcastState()
 }
@@ -728,7 +771,7 @@ async function hostImage(filePath, claimedAt) {
 }
 
 function sendImage(target) {
-  if (!session.image || session.closed) return
+  if (!session.image || session.closed || session.preview) return
   const current = session
   current.imageSend ??= new AbortController()
   const controller = current.imageSend
@@ -786,6 +829,7 @@ function showPicture(url) {
 // and video too if the frame APIs are unavailable. Audio files get no video track: one that never
 // receives a frame can hold the viewer's <video> below HAVE_CURRENT_DATA, so it never plays.
 function publishStream() {
+  if (session.preview) return
   unpublishStream()
   const video = ui.localVideo
   const captured = video.captureStream()
@@ -987,7 +1031,7 @@ async function sampleConnection() {
 
 function checkpointPlayback(state = null) {
   if (!state) {
-    if (!isHost() || session.openingMedia || session.mediaError || (!player.loaded && !youtube.loaded && !session.image) || !session.playing) return
+    if (!isHost() || session.preview || session.openingMedia || session.mediaError || (!player.loaded && !youtube.loaded && !session.image) || !session.playing) return
     session.sequence = nextRevision(session.sequence)
     state = hostState()
   }
@@ -999,6 +1043,7 @@ function checkpointPlayback(state = null) {
 
 function broadcastState(target) {
   if (session.closed || session.role !== 'host' || !session.stateAction) return
+  if (session.preview) { saveRoom(); render(); return }
   const current = session
   // Coalesce periodic/event updates behind an outstanding send; don't build a stale queue.
   if (current.sendPending && !target) { current.sendDirty = true; return }
@@ -1067,12 +1112,14 @@ function applyCommand(cmd, value) {
 function receiveState(value, peerId) {
   if (session.closed || !session.peers.has(peerId)) return
   const state = cleanState(value, peerId)
-  if (!state || !acceptsState(state, session.authority)) return
+  if (!state || !acceptsState(state, session.preview ? null : session.authority)) return
+  session.restorePending = null
   const changed = !sameClaim(state, session.authority)
   if (isHost()) {
+    const wasPreview = session.preview
     checkpointPlayback()
     stopHosting()
-    toast('Another participant is hosting now')
+    if (!wasPreview) toast('Another participant is hosting now')
   }
   if (changed) {
     detachRemoteStream()
@@ -1167,7 +1214,7 @@ const myProfile = () => ({name: myName, username: identity?.username || null, st
 
 // Friends see whether you're in a room, and what you're hosting.
 function myStatus() {
-  const hosting = session.role === 'host' && (player.loaded || youtube.loaded || Boolean(session.image))
+  const hosting = session.role === 'host' && !session.preview && (player.loaded || youtube.loaded || Boolean(session.image))
   return {inRoom: Boolean(session.room), hosting, title: hosting ? hostedTitle() : null}
 }
 
@@ -1770,6 +1817,7 @@ async function refreshAvailability() {
     current.availableFiles = new Set(entries.filter(([id, path], i) => available[i] && current.ownFiles.get(id) === path).map(([id]) => id))
     shareAvailability()
     render()
+    restoreObservedPlayback()
   } catch {
     if (session === current && !current.closed) toast('Could not check saved media files.', true)
   }
@@ -2076,6 +2124,7 @@ const hostPlaying = () => youtube.videoId ? youtube.playing || (session.loop && 
 const isPlaying = () => (isHost() ? hostPlaying() : Boolean(session.remote?.playing))
 
 function control(cmd, value) {
+  if (session.preview && cmd === 'play') activatePreview()
   if (isHost() ? session.image : session.remote?.image) return // a picture has nothing to play
   if (isHost()) return applyCommand(cmd, value)
   const r = session.remote
@@ -2156,7 +2205,7 @@ function render() {
   if (problem) ui.linkWarningTip.textContent = stale ? 'The host stopped responding. Waiting for playback to recover.' : network.error || (connection.problem ? connection.detail : health?.detail)
   ui.title.textContent = (host ? hostedTitle() : r?.title) || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
-  ui.role.textContent = {host: `Hosting${converting}`, viewer: `Watching${converting}`, idle: session.connection.joining && !peerCount ? 'Joining room' : ''}[role]
+  ui.role.textContent = {host: session.preview ? 'Ready to resume' : `Hosting${converting}`, viewer: `Watching${converting}`, idle: session.connection.joining && !peerCount ? 'Joining room' : ''}[role]
 
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
@@ -2920,7 +2969,10 @@ player.addEventListener('loading', () => render())
 player.addEventListener('error', ({detail}) => { if (isHost()) failHosting(detail); else toast(detail, true) })
 
 youtube.addEventListener('ready', () => { if (isHost()) broadcastState() })
-youtube.addEventListener('state', () => render())
+youtube.addEventListener('state', () => {
+  if (session.preview && youtube.playing) activatePreview()
+  render()
+})
 youtube.addEventListener('error', ({detail}) => { if (isHost()) failHosting(detail); else toast(detail, true) })
 youtube.addEventListener('blocked', () => toast('Click Play in the YouTube player to allow playback.'))
 youtube.addEventListener('ended', () => {
