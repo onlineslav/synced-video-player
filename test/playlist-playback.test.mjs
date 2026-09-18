@@ -37,7 +37,7 @@ function setup(role = 'host') {
   const calls = {closed: 0, detached: 0, unpublished: 0, sent: [], played: []}
   session.playlistAction = {send: (message) => { calls.sent.push(message); return Promise.resolve() }}
   const context = vm.createContext({session, removeItem, mergePlaylist, identity: {username: 'self'},
-    orderedItems, nextItem, playable: () => true, isPlaying: () => Boolean(session.testPlaying),
+    orderedItems, nextItem, playable: () => true,
     playItem: (...args) => calls.played.push(args),
     youtube: {close: () => {}},
     isHost: () => session.role === 'host', player: {close: () => calls.closed++},
@@ -76,14 +76,13 @@ test('Removing another item leaves current playback running', () => {
   assert.equal(calls.played.length, 0)
 })
 
-for (const playing of [false, true]) test(`Removing current media selects next/previous and preserves playing=${playing}`, () => {
+test('Removing current media selects the next or previous item and always loads it paused', () => {
   for (const position of [0, 2]) {
     const {session, calls, context} = setup()
     session.playing.position = position
-    session.testPlaying = playing
     context.removeFromPlaylist('playing')
     assert.equal(calls.played[0][0], 'other')
-    assert.equal(calls.played[0][2].autoplay, playing)
+    assert.equal(calls.played[0][2].autoplay, false)
   }
 })
 

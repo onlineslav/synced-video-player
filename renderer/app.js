@@ -1755,7 +1755,7 @@ function stopRemovedPlayback() {
   const id = isHost() ? session.playing?.id : session.remote?.playlistId
   if (!id || !session.playlist.removed.has(id)) return false
   const advance = isHost()
-  const options = {autoplay: isPlaying(), preview: Boolean(session.preview)}
+  const options = {autoplay: false, preview: Boolean(session.preview)}
   const cursor = session.playing || session.playlist.current
   const remaining = orderedItems(session.playlist).filter(playable)
   const next = nextItem(session.playlist, cursor, playable) || remaining.at(-1)
