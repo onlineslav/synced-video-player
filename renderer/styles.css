@@ -1208,11 +1208,7 @@ button:disabled {
 .board-menu:focus-within .board-visibility-menu {
   visibility: visible;
   opacity: 1;
-  transition-delay: 0.5s;
-}
-
-#board-visibility {
-  background: rgba(22, 22, 29, 0.9);
+  transition-delay: 0.3s;
 }
 
 #board-visibility[aria-pressed="true"] svg {
