@@ -1285,14 +1285,14 @@ button:disabled {
   padding-top: 6px;
   visibility: hidden;
   opacity: 0;
-  transition: opacity 50ms ease, visibility 0s 50ms;
+  transition: opacity 150ms ease, visibility 0s 150ms;
 }
 
 .board-menu:hover .board-visibility-menu,
 .board-menu:focus-within .board-visibility-menu {
   visibility: visible;
   opacity: 1;
-  transition-delay: 250ms;
+  transition-delay: 250ms, 0s;
 }
 
 #board-visibility[aria-pressed="true"] svg {
