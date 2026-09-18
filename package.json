@@ -1,7 +1,7 @@
 {
   "name": "synced-video-player",
   "productName": "Synced Video Player",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Watch local video files together. One host streams, everyone stays in sync.",
   "main": "main/index.js",
   "private": true,
