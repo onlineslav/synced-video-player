@@ -2768,10 +2768,7 @@ async function importYouTube(form, {play = true} = {}) {
     input.value = ''
     status('')
     if (added.length && play) hostYouTube(added[0])
-    else if (added.length) {
-      render()
-      status(added.length === 1 ? 'Added to the playlist' : `Added ${added.length} videos to the playlist`)
-    }
+    else if (added.length) render()
   } catch (error) {
     if (session === current && !current.closed) status(errorMessage(error))
   } finally {
