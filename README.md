@@ -16,7 +16,7 @@ Watch or listen to a media file together on Windows or Mac, with up to eight peo
 
 You can also paste a YouTube video or playlist URL into the empty player and press **Enter** or click the arrow inside the field. Playlist videos are added in YouTube's order, starting from the first entry even if the link points into the middle of the playlist. Imports must fit within the room's 500-item limit. YouTube entries remain playable when their original contributor is offline, and their progress is saved with the room. Videos must allow embedding and be available to each participant; YouTube may show ads or require interaction before playback.
 
-Hover over the pencil for 250 ms to reveal the eye button with a 150 ms fade. Annotations remain visible by default after you close the drawing tools; turn the eye off to hide them when the tools are closed. This visibility choice only affects your screen.
+Hover over the pencil for 150 ms to reveal the eye button with a 150 ms fade. Annotations remain visible by default after you close the drawing tools; turn the eye off to hide them when the tools are closed. This visibility choice only affects your screen.
 
 In the playlist sidebar, click **+** for local files or the adjacent **link icon** for a YouTube URL to add media without interrupting playback. When the player is empty, the first added item loads paused at 0:00. Media opened from the central player also starts paused at 0:00; press Play when ready. Submit a URL with Enter or the arrow inside the field, or drag a YouTube video/playlist link onto the sidebar.
 
