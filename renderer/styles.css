@@ -961,6 +961,43 @@ button:disabled {
   stroke-linecap: round;
 }
 
+.playlist-add-area {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playlist-add[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.playlist-add-choices {
+  display: flex;
+  gap: 8px;
+}
+
+.playlist-add-choices button {
+  flex: 1;
+}
+
+.playlist-add-choices button[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.playlist-url-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+#playlist-url-form input {
+  font-size: 13px;
+}
+
 .playlist-items {
   position: relative; /* rows' offsetTop is measured from the list, whatever its scroll */
   list-style: none;

@@ -14,9 +14,11 @@ Watch or listen to a media file together on Windows or Mac, with up to eight peo
 2. The other person types the code and clicks **Join**.
 3. Whoever clicks **Open media** (or drops a file on the window) hosts it. If the other person opens a file later, they become the host.
 
-You can also paste a YouTube video or playlist URL into the empty player and click **Open**. Playlist videos are added in YouTube's order, starting from the first entry even if the link points into the middle of the playlist. Imports must fit within the room's 500-item limit. YouTube entries remain playable when their original contributor is offline, and their progress is saved with the room. Videos must allow embedding and be available to each participant; YouTube may show ads or require interaction before playback.
+You can also paste a YouTube video or playlist URL into the empty player and press **Enter** or click the arrow inside the field. Playlist videos are added in YouTube's order, starting from the first entry even if the link points into the middle of the playlist. Imports must fit within the room's 500-item limit. YouTube entries remain playable when their original contributor is offline, and their progress is saved with the room. Videos must allow embedding and be available to each participant; YouTube may show ads or require interaction before playback.
 
-Hover over the pencil for 0.3 seconds to reveal the eye button. Enable it to keep everyone's annotations visible after you close the drawing tools. This visibility choice only affects your screen.
+Hover over the pencil for 0.3 seconds to reveal the eye button. Annotations remain visible by default after you close the drawing tools; turn the eye off to hide them when the tools are closed. This visibility choice only affects your screen.
+
+In the playlist sidebar, click **+** and choose **Local files** or **YouTube URL** to add media without interrupting playback. Submit a URL with Enter or the arrow inside the field.
 
 In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
 

@@ -264,9 +264,22 @@
             <h2 class="playlist-title">Playlist</h2>
             <p id="playlist-empty" class="playlist-empty">Add videos, songs or pictures, or drop them here. Anyone in the room can add to the list and play from it.</p>
             <ol id="playlist-items" class="playlist-items"></ol>
-            <button id="playlist-add" class="playlist-add" title="Add files" aria-label="Add files to the playlist">
-              <svg viewBox="0 0 24 24"><path d="M12 7v10M7 12h10" /></svg>
-            </button>
+            <div id="playlist-add-area" class="playlist-add-area">
+              <button id="playlist-add" class="playlist-add" title="Add media" aria-label="Add media to the playlist" aria-expanded="false" aria-controls="playlist-add-choices">
+                <svg viewBox="0 0 24 24"><path d="M12 7v10M7 12h10" /></svg>
+              </button>
+              <div id="playlist-add-choices" class="playlist-add-choices" hidden>
+                <button id="playlist-add-files" class="small">Local files</button>
+                <button id="playlist-add-url" class="small" aria-expanded="false" aria-controls="playlist-url-form">YouTube URL</button>
+              </div>
+              <form id="playlist-url-form" class="media-url-form" hidden>
+                <input type="url" placeholder="Video or playlist URL" aria-label="YouTube video or playlist URL" aria-describedby="playlist-url-status" required />
+                <button type="submit" class="url-submit" title="Add to playlist" aria-label="Add to playlist">
+                  <svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></svg>
+                </button>
+              </form>
+              <p id="playlist-url-status" class="playlist-url-status" role="status" hidden></p>
+            </div>
           </div>
         </div>
       </aside>

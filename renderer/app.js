@@ -201,6 +201,12 @@ const ui = {
   playlistTab: $('playlist-tab'),
   playlistEdge: $('playlist-edge'),
   playlistAdd: $('playlist-add'),
+  playlistAddArea: $('playlist-add-area'),
+  playlistAddChoices: $('playlist-add-choices'),
+  playlistAddFiles: $('playlist-add-files'),
+  playlistAddUrl: $('playlist-add-url'),
+  playlistUrlForm: $('playlist-url-form'),
+  playlistUrlStatus: $('playlist-url-status'),
   playlistItems: $('playlist-items'),
   playlistEmpty: $('playlist-empty'),
   openButtons: document.querySelectorAll('[data-open-media]'),
@@ -584,6 +590,9 @@ async function leaveRoom() {
   current.ownFiles.clear()
   ui.mediaUrl.value = ''
   ui.mediaUrlStatus.hidden = true
+  ui.playlistUrlForm.reset()
+  ui.playlistUrlStatus.hidden = true
+  setPlaylistAddOpen(false)
   youtube.close()
   endStroke()
   player.close()
@@ -2369,7 +2378,35 @@ try {
   setPlaylistOpen(false)
 }
 
-ui.playlistAdd.addEventListener('click', async () => addToPlaylist(await window.api.chooseMediaFiles()))
+function setPlaylistAddOpen(open) {
+  ui.playlistAdd.setAttribute('aria-expanded', String(open))
+  ui.playlistAddChoices.hidden = !open
+  if (!open) {
+    ui.playlistUrlForm.hidden = true
+    ui.playlistAddUrl.setAttribute('aria-expanded', 'false')
+  }
+}
+ui.playlistAdd.addEventListener('click', () => setPlaylistAddOpen(ui.playlistAddChoices.hidden))
+ui.playlistAddFiles.addEventListener('click', async () => {
+  const current = session
+  setPlaylistAddOpen(false)
+  const paths = await window.api.chooseMediaFiles()
+  if (session === current && !current.closed) addToPlaylist(paths)
+})
+ui.playlistAddUrl.addEventListener('click', () => {
+  const open = ui.playlistUrlForm.hidden
+  ui.playlistUrlForm.hidden = !open
+  ui.playlistAddUrl.setAttribute('aria-expanded', String(open))
+  if (open) ui.playlistUrlForm.querySelector('input').focus()
+})
+document.addEventListener('pointerdown', (event) => {
+  if (!ui.playlistAddArea.contains(event.target)) setPlaylistAddOpen(false)
+})
+ui.playlistAddArea.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return
+  setPlaylistAddOpen(false)
+  ui.playlistAdd.focus()
+})
 
 // Reordering, like Spotify: hold a row and drag it. It follows the pointer (kept inside the list), the
 // rows it passes slide aside to open a gap where it will land, and near the top or bottom edge the
@@ -2627,20 +2664,22 @@ for (const button of ui.openButtons) {
 }
 
 let importingYouTube = false
-ui.mediaUrlForm.addEventListener('submit', async (event) => {
-  event.preventDefault()
+async function importYouTube(form, {play = true} = {}) {
   if (importingYouTube || !session.room || session.closed) return
+  const input = form.querySelector('input')
+  const statusElement = form === ui.mediaUrlForm ? ui.mediaUrlStatus : ui.playlistUrlStatus
   const current = session
   const importer = new YouTubePlayer(document.createElement('div'))
   const cleanup = () => importer.close()
   const status = (text) => {
-    ui.mediaUrlStatus.textContent = text
-    ui.mediaUrlStatus.hidden = !text
+    statusElement.textContent = text
+    statusElement.hidden = !text
   }
   try {
-    const {videoId, playlistId} = parseYouTubeUrl(ui.mediaUrl.value)
+    const {videoId, playlistId} = parseYouTubeUrl(input.value)
     importingYouTube = true
     ui.mediaUrlForm.querySelector('button').disabled = true
+    ui.playlistUrlForm.querySelector('button').disabled = true
     status(playlistId ? 'Reading YouTube playlist…' : 'Loading YouTube video…')
     // Cueing retrieves the source order without starting playback or disturbing the current host.
     if (playlistId) {
@@ -2667,9 +2706,13 @@ ui.mediaUrlForm.addEventListener('submit', async (event) => {
     current.playlistAction.send({type: 'sync', ...playlistSnapshot(current.playlist)}).catch(() => toast('Could not share the playlist. Rejoin the room to retry.', true))
     saveRoom()
     setPlaylistOpen(true)
-    ui.mediaUrl.value = ''
+    input.value = ''
     status('')
-    if (added.length) hostYouTube(added[0])
+    if (added.length && play) hostYouTube(added[0])
+    else if (added.length) {
+      render()
+      status(added.length === 1 ? 'Added to the playlist' : `Added ${added.length} videos to the playlist`)
+    }
   } catch (error) {
     if (session === current && !current.closed) status(errorMessage(error))
   } finally {
@@ -2678,8 +2721,15 @@ ui.mediaUrlForm.addEventListener('submit', async (event) => {
     importer.dispose()
     importingYouTube = false
     ui.mediaUrlForm.querySelector('button').disabled = false
+    ui.playlistUrlForm.querySelector('button').disabled = false
   }
-})
+}
+for (const form of [ui.mediaUrlForm, ui.playlistUrlForm]) {
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    importYouTube(form, {play: form === ui.mediaUrlForm})
+  })
+}
 
 ui.play.addEventListener('click', togglePlay)
 for (const button of document.querySelectorAll('[data-skip]')) {
