@@ -18,7 +18,7 @@ You can also paste a YouTube video or playlist URL into the empty player and pre
 
 Hover over the pencil for 250 ms to reveal the eye button with a 50 ms fade. Annotations remain visible by default after you close the drawing tools; turn the eye off to hide them when the tools are closed. This visibility choice only affects your screen.
 
-In the playlist sidebar, click **+** for local files or the adjacent **link icon** for a YouTube URL to add media without interrupting playback. Submit a URL with Enter or the arrow inside the field, or drag a YouTube video/playlist link onto the sidebar.
+In the playlist sidebar, click **+** for local files or the adjacent **link icon** for a YouTube URL to add media without interrupting playback. When the player is empty, the first added item loads paused at 0:00. Media opened from the central player also starts paused at 0:00; press Play when ready. Submit a URL with Enter or the arrow inside the field, or drag a YouTube video/playlist link onto the sidebar.
 
 In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
 

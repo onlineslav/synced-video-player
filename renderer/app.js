@@ -668,7 +668,7 @@ function setRole(role) {
 // ---------- Hosting ----------
 
 // `item` is the playlist item this file was started from, if any.
-async function hostFile(filePath, item = null, {preview = false, start} = {}) {
+async function hostFile(filePath, item = null, {preview = false, start, autoplay = true} = {}) {
   if (!session.room || session.closed) return
   const current = session
   if (!item) {
@@ -700,7 +700,7 @@ async function hostFile(filePath, item = null, {preview = false, start} = {}) {
     const opened = await player.open(filePath, start ?? (resume?.completed ? 0 : resume?.time || 0))
     if (session !== current || current.closed || current.claimedAt !== claimedAt || !isHost()) return
     current.openingMedia = false
-    if (opened && !current.preview) ui.localVideo.play().catch((error) => {
+    if (opened && autoplay && !current.preview) ui.localVideo.play().catch((error) => {
       if (session === current && !current.closed && current.claimedAt === claimedAt && isHost()) failHosting(error)
     })
   } catch (err) {
@@ -725,7 +725,7 @@ function stopHosting() {
 
 const hostedTitle = () => session.image?.name || youtube.title || (youtube.videoId && session.playlist.items.get(session.playing?.id)?.title) || player.media?.title || player.media?.name || null
 
-function hostYouTube(item, {preview = false, start} = {}) {
+function hostYouTube(item, {preview = false, start, autoplay = true} = {}) {
   if (!session.room || session.closed) return
   checkpointPlayback()
   saveRoom()
@@ -743,7 +743,7 @@ function hostYouTube(item, {preview = false, start} = {}) {
   session.hostId = selfId
   session.remote = null
   detachRemoteStream()
-  youtube.open(item.youtubeId, start ?? (resume?.completed ? 0 : resume?.time || 0), !preview)
+  youtube.open(item.youtubeId, start ?? (resume?.completed ? 0 : resume?.time || 0), autoplay && !preview)
   setRole('host')
   broadcastState()
 }
@@ -1710,6 +1710,14 @@ const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>'
 // File capabilities are restored only from this identity's local copy of this room.
 let itemCount = 0
 
+function loadAddedMedia(items, {replace = false} = {}) {
+  if (!items.length || (!replace && session.role !== 'idle')) return
+  const item = items[0]
+  const options = {start: 0, autoplay: false}
+  if (item.youtubeId) hostYouTube(item, options)
+  else hostFile(session.ownFiles.get(item.id), item, options)
+}
+
 function addToPlaylist(filePaths, {notify = true} = {}) {
   if (!session.room) return []
   const added = []
@@ -2435,7 +2443,7 @@ ui.playlistAdd.addEventListener('click', async () => {
   const current = session
   setPlaylistAddOpen(false)
   const paths = await window.api.chooseMediaFiles()
-  if (session === current && !current.closed) addToPlaylist(paths)
+  if (session === current && !current.closed) loadAddedMedia(addToPlaylist(paths))
 })
 ui.playlistAddUrl.addEventListener('click', () => {
   const open = ui.playlistAddUrl.getAttribute('aria-expanded') !== 'true'
@@ -2547,7 +2555,7 @@ ui.playlist.addEventListener('drop', (event) => {
   event.preventDefault()
   ui.playlist.classList.remove('dropping')
   if (event.dataTransfer.files.length) {
-    addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)).filter(Boolean))
+    loadAddedMedia(addToPlaylist([...event.dataTransfer.files].map((file) => window.api.pathForFile(file)).filter(Boolean)))
     return
   }
   if (importingYouTube) return toast('A YouTube import is already in progress. Try again when it finishes.')
@@ -2556,7 +2564,7 @@ ui.playlist.addEventListener('drop', (event) => {
       text: event.dataTransfer.getData('text/plain'), mozUrl: event.dataTransfer.getData('text/x-moz-url')})
     setPlaylistAddOpen(true)
     ui.playlistUrlForm.querySelector('input').value = url
-    importYouTube(ui.playlistUrlForm, {play: false})
+    importYouTube(ui.playlistUrlForm, {replace: false})
   } catch (error) { toast(errorMessage(error), true) }
 })
 
@@ -2717,13 +2725,13 @@ for (const button of ui.openButtons) {
     const items = addToPlaylist(filePaths)
     if (items.length) {
       if (items.length > 1) setPlaylistOpen(true)
-      hostFile(session.ownFiles.get(items[0].id), items[0])
+      loadAddedMedia(items, {replace: true})
     }
   })
 }
 
 let importingYouTube = false
-async function importYouTube(form, {play = true} = {}) {
+async function importYouTube(form, {replace = true} = {}) {
   if (importingYouTube || !session.room || session.closed) return
   const input = form.querySelector('input')
   const statusElement = form === ui.mediaUrlForm ? ui.mediaUrlStatus : ui.playlistUrlStatus
@@ -2767,8 +2775,8 @@ async function importYouTube(form, {play = true} = {}) {
     setPlaylistOpen(true)
     input.value = ''
     status('')
-    if (added.length && play) hostYouTube(added[0])
-    else if (added.length) render()
+    loadAddedMedia(added, {replace})
+    render()
   } catch (error) {
     if (session === current && !current.closed) status(errorMessage(error))
   } finally {
@@ -2783,7 +2791,7 @@ async function importYouTube(form, {play = true} = {}) {
 for (const form of [ui.mediaUrlForm, ui.playlistUrlForm]) {
   form.addEventListener('submit', (event) => {
     event.preventDefault()
-    importYouTube(form, {play: form === ui.mediaUrlForm})
+    importYouTube(form, {replace: form === ui.mediaUrlForm})
   })
 }
 
@@ -3071,7 +3079,7 @@ ui.stage.addEventListener('drop', (event) => {
   const file = event.dataTransfer.files[0]
   const filePath = file && window.api.pathForFile(file)
   if (!filePath) return // not a file on disk (dragged from a page, or from inside the app)
-  if (!SUBTITLE_FILE.test(filePath)) return hostFile(filePath)
+  if (!SUBTITLE_FILE.test(filePath)) return loadAddedMedia(addToPlaylist([filePath]), {replace: true})
   addSubtitleFile(filePath)
 })
 

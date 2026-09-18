@@ -6,6 +6,28 @@ import {createPlaylist, addItem, removeItem, mergePlaylist} from '../renderer/pl
 
 // Exercise the renderer's message handlers with media/network boundaries stubbed.
 const source = readFileSync(new URL('../renderer/app.js', import.meta.url), 'utf8')
+
+test('new media loads paused at zero in an empty player; queued additions preserve current playback', () => {
+  const calls = []
+  const session = {role: 'idle', ownFiles: new Map([['local', 'movie.mp4']])}
+  const context = vm.createContext({session,
+    hostFile: (...args) => calls.push(['file', ...args]), hostYouTube: (...args) => calls.push(['youtube', ...args]),
+  })
+  vm.runInContext(source.match(/^function loadAddedMedia\([^]*?^}/m)[0], context)
+  context.loadAddedMedia([{id: 'local'}])
+  assert.equal(calls[0][1], 'movie.mp4')
+  assert.deepEqual({...calls[0][3]}, {start: 0, autoplay: false})
+  context.loadAddedMedia([{id: 'yt', youtubeId: 'M7lc1UVf-VE'}])
+  assert.deepEqual({...calls[1][2]}, {start: 0, autoplay: false})
+  session.role = 'host'
+  context.loadAddedMedia([{id: 'local'}])
+  session.role = 'viewer'
+  context.loadAddedMedia([{id: 'yt', youtubeId: 'M7lc1UVf-VE'}])
+  assert.equal(calls.length, 2)
+  context.loadAddedMedia([{id: 'local'}], {replace: true})
+  assert.equal(calls.length, 3)
+  assert.deepEqual({...calls[2][3]}, {start: 0, autoplay: false})
+})
 function setup(role = 'host') {
   const playlist = createPlaylist()
   for (const id of ['playing', 'other']) addItem(playlist, {id, title: id, position: 1}, 'owner')

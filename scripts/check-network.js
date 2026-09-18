@@ -255,7 +255,21 @@ app.whenReady().then(async () => {
     await Promise.all([a, b].map((win) => until(win, '__test.friendNetwork.online.size === 1')))
     await Promise.all(windows.map((win) => run(win, '__test.leaveRoom()')))
     await run(a, '__test.enterRoom("RESTORE1", {joining:false})')
-    await run(a, `__test.hostFile(${JSON.stringify(video)})`)
+    ipcMain.removeHandler('dialog:media-files')
+    ipcMain.handle('dialog:media-files', () => [video])
+    for (const selector of ['#empty [data-open-media]', '#playlist-add']) {
+      await run(a, `document.querySelector(${JSON.stringify(selector)}).click()`)
+      await until(a, 'document.getElementById("local-video").readyState >= 2 && !__test.session.openingMedia')
+      assert.equal(await run(a, 'document.getElementById("local-video").paused'), true)
+      assert.ok(await run(a, 'document.getElementById("local-video").currentTime < 0.1'))
+      assert.equal(await run(a, 'getComputedStyle(document.getElementById("empty")).display'), 'none')
+      if (selector.includes('empty')) {
+        await run(a, '__test.removeFromPlaylist(__test.session.playing.id)')
+        await Promise.all(windows.map((win) => until(win, '__test.session.role === "idle"')))
+      }
+    }
+    console.log('PASS: Local files added from the player or empty sidebar load paused at zero and dismiss the empty player')
+    await run(a, '__test.control("play")')
     await until(a, 'document.getElementById("local-video").readyState >= 3')
     await run(a, '__test.control("pause"); __test.control("seek", 7.25)')
     await until(a, 'Math.abs(document.getElementById("local-video").currentTime - 7.25) < 0.1')
@@ -385,7 +399,23 @@ app.whenReady().then(async () => {
     await until(b, `!__test.session.playlist.items.has(${JSON.stringify(playlistIds[1])}) && __test.session.ownFiles.size === 0`)
     console.log('PASS: Missing files become unavailable; a returning owner’s stale snapshot cannot resurrect a removed item')
     if (checkYouTube) {
+      await run(a, '[...__test.session.playlist.items.keys()].forEach(id => __test.removeFromPlaylist(id))')
+      await Promise.all(windows.map((win) => until(win, '__test.session.role === "idle" && __test.session.playlist.items.size === 0')))
+      await run(a, `document.getElementById('playlist-add-url').click(); document.querySelector('#playlist-url-form input').value = 'https://www.youtube.com/watch?v=M7lc1UVf-VE'; document.getElementById('playlist-url-form').requestSubmit()`)
+      await Promise.all(windows.map((win) => until(win, '__test.youtube.loaded && __test.youtube.duration > 0', 45000)))
+      for (const win of windows) {
+        assert.equal(await run(win, '__test.youtube.playing'), false)
+        assert.ok(await run(win, '__test.youtube.time < 0.1'))
+        assert.equal(await run(win, 'getComputedStyle(document.getElementById("empty")).display'), 'none')
+      }
+      console.log('PASS: A YouTube link added to an empty sidebar loads paused at zero for everyone and dismisses the empty player')
+      await run(a, '__test.removeFromPlaylist(__test.session.playing.id)')
+      await Promise.all(windows.map((win) => until(win, '__test.session.role === "idle"')))
       await run(a, `document.getElementById('media-url').value = 'https://www.youtube.com/watch?v=M7lc1UVf-VE'; document.getElementById('media-url-form').requestSubmit()`)
+      await until(a, '__test.youtube.loaded && __test.youtube.duration > 0', 45000)
+      assert.equal(await run(a, '__test.youtube.playing'), false)
+      assert.ok(await run(a, '__test.youtube.time < 0.1'))
+      await run(a, '__test.control("play")')
       await Promise.all(windows.map((win) => until(win, '__test.youtube.playing && __test.youtube.time > 1', 45000)))
       assert.equal(await run(c, '[...__test.session.playlist.items.values()].filter(item => item.youtubeId).length'), 1)
       await run(b, '__test.control("pause")')
