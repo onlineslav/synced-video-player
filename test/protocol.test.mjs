@@ -28,6 +28,14 @@ test('opaque subtitle catalogs never publish paths and only resolve selected loc
   assert.equal(new SubtitleCatalog().local.get(local), undefined)
 })
 
+test('YouTube state accepts identifiers only and cannot also claim an image', () => {
+  assert.equal(cleanState(state({youtubeId: 'M7lc1UVf-VE'}), 'host').youtubeId, 'M7lc1UVf-VE')
+  for (const youtubeId of ['', 'https://youtube.com/watch?v=M7lc1UVf-VE', '../file', {}]) {
+    assert.equal(cleanState(state({youtubeId}), 'host'), null)
+  }
+  assert.equal(cleanState(state({youtubeId: 'M7lc1UVf-VE', image: {id: '1'}}), 'host'), null)
+})
+
 test('all roles reject losing host claims and out-of-order messages within a claim', () => {
   const current = {hostId: 'b', claimedAt: 10, sequence: 5}
   assert.equal(acceptsState({hostId: 'a', claimedAt: 9, sequence: 999}, current), false)

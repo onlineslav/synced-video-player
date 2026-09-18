@@ -1,5 +1,6 @@
 // Small, explicit boundaries for data that comes from another computer.
 import {cleanText} from './profile.mjs'
+import {isYouTubeId} from '../shared/youtube.mjs'
 
 export const PROTOCOL = 2
 export const MAX_PEERS = 7 // eight people including this app
@@ -61,6 +62,7 @@ export function cleanState(value, peerId) {
   if (value.playlistId !== null && !isId(value.playlistId)) return null
   if (value.playlistPosition !== undefined && !Number.isFinite(value.playlistPosition)) return null
   if (value.finished !== undefined && typeof value.finished !== 'boolean') return null
+  if (value.youtubeId != null && (!isYouTubeId(value.youtubeId) || value.image)) return null
   if (value.title != null && (typeof value.title !== 'string' || value.title.length > 1000)) return null
   const viewers = {}, senders = {}
   for (const [field, cleaner, out] of [['viewers', cleanTelemetry, viewers], ['senders', cleanSender, senders]]) {
@@ -79,6 +81,7 @@ export function cleanState(value, peerId) {
     transcoding: value.transcoding, ended: value.ended, image: value.image && {id: value.image.id},
     error: typeof value.error === 'string' ? cleanText(value.error, 200) : null,
     playlistId: value.playlistId, playlistPosition: value.playlistPosition ?? 0, finished: value.finished === true,
+    ...(value.youtubeId && {youtubeId: value.youtubeId}),
     audio, subtitles, audioSelected: value.audioSelected,
     subtitleSelected: value.subtitleSelected, sender: cleanSender(value.sender), viewers, senders,
   }

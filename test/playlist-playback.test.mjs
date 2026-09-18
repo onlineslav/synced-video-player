@@ -15,6 +15,7 @@ function setup(role = 'host') {
   const calls = {closed: 0, detached: 0, unpublished: 0, sent: []}
   session.playlistAction = {send: (message) => { calls.sent.push(message); return Promise.resolve() }}
   const context = vm.createContext({session, removeItem, mergePlaylist, identity: {username: 'self'},
+    youtube: {close: () => {}},
     isHost: () => session.role === 'host', player: {close: () => calls.closed++},
     detachRemoteStream: () => calls.detached++, unpublishStream: () => calls.unpublished++, clearHostImage: () => {},
     setRole: (role) => { session.role = role }, render: () => {}, saveRoom: () => {}, shareAvailability: () => {},

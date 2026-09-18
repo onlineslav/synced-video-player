@@ -1573,6 +1573,56 @@ button:disabled {
   display: none;
 }
 
+.youtube-player {
+  position: absolute;
+  /* Keep YouTube's own controls clear of the room's top bar and shared controls. */
+  inset: 64px 0 76px;
+}
+
+.youtube-player iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.stage.showing-youtube video {
+  display: none;
+}
+
+.media-url-form {
+  display: flex;
+  gap: 8px;
+  width: min(480px, 100%);
+}
+
+.media-url-form input {
+  min-width: 0;
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.media-url-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.media-url-form input::placeholder {
+  color: var(--muted);
+}
+
+#media-url-status {
+  max-width: 480px;
+  font-size: 13px;
+}
+
+#empty-text:empty {
+  display: none;
+}
+
 .stage {
   container-type: size;
 }

@@ -3,6 +3,7 @@ const {contextBridge, ipcRenderer, webUtils} = require('electron')
 contextBridge.exposeInMainWorld('api', {
   getVersion: () => ipcRenderer.invoke('app:version'),
   chooseMedia: () => ipcRenderer.invoke('dialog:media'),
+  youTubeTitles: (ids) => ipcRenderer.invoke('youtube:titles', ids),
   chooseMediaFiles: () => ipcRenderer.invoke('dialog:media-files'),
   chooseSubtitle: () => ipcRenderer.invoke('dialog:subtitle'),
   pathForFile: (file) => webUtils.getPathForFile(file),

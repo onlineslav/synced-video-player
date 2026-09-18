@@ -6,6 +6,7 @@
 // the latest move wins everywhere (`movedAt`, then `movedBy`), so reorders from two people converge.
 import {cleanDisplayName, cleanText} from './profile.mjs'
 import {isRevision, finite} from './protocol.mjs'
+import {isYouTubeId} from '../shared/youtube.mjs'
 
 export const MAX_ITEMS = 500
 export const MAX_REMOVED = 4096
@@ -19,12 +20,14 @@ const isNewerMove = (a, b) => (a.movedAt !== b.movedAt ? a.movedAt > b.movedAt :
 
 // Adds an item from a peer. `owner` is their persistent, authenticated username. Returns the item, or
 // null if it was rejected, already removed, or already there.
-export function addItem(playlist, {id, title, position, ownerName, movedAt = 0, movedBy = ''}, owner) {
+export function addItem(playlist, {id, title, position, ownerName, movedAt = 0, movedBy = '', youtubeId}, owner) {
+  if (youtubeId !== undefined && !isYouTubeId(youtubeId)) return null
   if (!isId(id) || !isId(owner) || !Number.isFinite(position) || playlist.removed.has(id) || playlist.items.has(id)) return null
   const cleanTitle = cleanText(title, MAX_TITLE_LENGTH)
   if (!cleanTitle || playlist.items.size >= MAX_ITEMS || playlist.removed.size + playlist.items.size >= MAX_REMOVED) return null
   const moved = isRevision(movedAt) && movedAt > 0 && isId(movedBy)
   const item = {id, title: cleanTitle, position, owner, ownerName: cleanDisplayName(ownerName), movedAt: moved ? movedAt : 0, movedBy: moved ? movedBy : ''}
+  if (youtubeId) item.youtubeId = youtubeId
   playlist.items.set(id, item)
   playlist.revision = Math.max(playlist.revision, item.movedAt)
   // A move can arrive before the item it moves, when the person who added it is further away.
@@ -93,7 +96,7 @@ export function recordProgress(playlist, value) {
 export function mergePlaylist(playlist, snapshot, {selfId, ownFiles} = {}) {
   for (const id of Array.isArray(snapshot?.removed) ? snapshot.removed.slice(0, MAX_REMOVED) : []) removeItem(playlist, id)
   for (const item of Array.isArray(snapshot?.items) ? snapshot.items.slice(0, MAX_ITEMS) : []) {
-    if (item?.owner === selfId && (!ownFiles?.has(item.id) || !playlist.items.has(item.id))) continue
+    if (item?.owner === selfId && !isYouTubeId(item?.youtubeId) && (!ownFiles?.has(item?.id) || !playlist.items.has(item?.id))) continue
     if (playlist.items.has(item?.id)) moveItem(playlist, item)
     else addItem(playlist, item || {}, item?.owner)
   }

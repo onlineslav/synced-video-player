@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' wss: https:"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self' wss: https:; frame-src svp-youtube:"
     />
     <title>Synced Video Player</title>
     <link rel="stylesheet" href="styles.css" />
@@ -151,9 +151,9 @@
         <span id="title" class="title"></span>
         <span id="role" class="role"></span>
         <div class="board-menu">
-        <button id="board-toggle" class="ghost icon-button" title="Whiteboard" aria-label="Whiteboard" aria-pressed="false">
-          <svg viewBox="0 0 24 24"><path d="M3.5 17.3V20.5h3.2l9.4-9.4-3.2-3.2zm15-8.8a.9.9 0 0 0 0-1.2l-2-2a.9.9 0 0 0-1.2 0L13.7 6.9l3.2 3.2z" /><path d="M2 22h20v-1H2z" /></svg>
-        </button>
+          <button id="board-toggle" class="ghost icon-button" title="Whiteboard" aria-label="Whiteboard" aria-pressed="false">
+            <svg viewBox="0 0 24 24"><path d="M3.5 17.3V20.5h3.2l9.4-9.4-3.2-3.2zm15-8.8a.9.9 0 0 0 0-1.2l-2-2a.9.9 0 0 0-1.2 0L13.7 6.9l3.2 3.2z" /><path d="M2 22h20v-1H2z" /></svg>
+          </button>
           <div class="board-visibility-menu">
             <button id="board-visibility" class="ghost icon-button" title="Keep annotations visible" aria-label="Keep annotations visible" aria-pressed="false">
               <svg viewBox="0 0 24 24"><path d="M12 5C7 5 3 8 1 12c2 4 6 7 11 7s9-3 11-7c-2-4-6-7-11-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" /><path class="eye-slash" d="m3 2 19 19-1.4 1.4-19-19z" /></svg>
@@ -172,6 +172,7 @@
         <div id="paused-title" class="paused-title" hidden></div>
         <video id="local-video" class="local"></video>
         <video id="remote-video" class="remote" playsinline></video>
+        <div id="youtube-player" class="youtube-player" hidden></div>
         <img id="picture" class="picture" alt="" draggable="false" hidden />
         <div id="captions" class="captions"></div>
         <canvas id="board" class="board"></canvas>
@@ -183,6 +184,12 @@
         <div id="empty" class="empty">
           <p id="empty-text"></p>
           <button data-open-media class="primary">Open media</button>
+          <span>or</span>
+          <form id="media-url-form" class="media-url-form">
+            <input id="media-url" type="url" placeholder="Insert video or playlist URL here" aria-label="Insert video or playlist URL here" required />
+            <button type="submit" title="Add YouTube media" aria-label="Add YouTube media">Open</button>
+          </form>
+          <p id="media-url-status" role="status" hidden></p>
           <button id="resume-room" hidden>Resume playlist</button>
         </div>
         <div id="spinner" class="spinner" hidden></div>

@@ -6,12 +6,17 @@ Watch or listen to a media file together on Windows or Mac, with up to eight peo
 - Pictures (JPG, PNG, GIF, WebP, AVIF, TIFF, PSD…, up to 50 MB) are sent to the other person at full resolution, so you can both look and draw on them.
 - Subtitles: tracks inside the file, `.srt`/`.ass`/`.ssa`/`.vtt` files next to the video, or any subtitle file you drop in. Each person picks their own track, or none. Image subtitles (Blu-ray PGS, DVD VobSub) can only be drawn into the picture, so those show for everyone.
 - No accounts or port forwarding. Direct connections need no server setup; restrictive networks need a configured TURN relay.
+- YouTube videos and public or unlisted playlists play through YouTube's embedded player on each participant's computer, with shared play, pause, seek and loop controls.
 
 ## Using it
 
 1. One person clicks **Create a room** and sends the code (e.g. `K7QM-2XPA`) to the other.
 2. The other person types the code and clicks **Join**.
 3. Whoever clicks **Open media** (or drops a file on the window) hosts it. If the other person opens a file later, they become the host.
+
+You can also paste a YouTube video or playlist URL into the empty player and click **Open**. Playlist videos are added in YouTube's order, starting from the first entry even if the link points into the middle of the playlist. Imports must fit within the room's 500-item limit. YouTube entries remain playable when their original contributor is offline, and their progress is saved with the room. Videos must allow embedding and be available to each participant; YouTube may show ads or require interaction before playback.
+
+Hover over the pencil for 0.3 seconds to reveal the eye button. Enable it to keep everyone's annotations visible after you close the drawing tools. This visibility choice only affects your screen.
 
 In a room you can also draw together on the whiteboard (pen button in the top bar) and send reactions everyone sees and hears: 📯 air horn, 👏 golf clap, 🦆 quack and 🎉 confetti.
 
@@ -70,6 +75,8 @@ npm start        # bundle the renderer and launch the app
 npm test         # unit tests (node:test)
 npm run test:startup # isolated Electron checks for stalled networking and concurrent app profiles
 npm run test:network # three local WebRTC peers: friends, rooms, media, controls and rejoining
+npm run test:youtube # live YouTube embed, controls, isolation and playlist import checks
+node scripts/electron.js scripts/check-network.js --youtube # shared YouTube controls across three peers (live service)
 npm run test:discovery # public Nostr discovery: different startup orders, friends, rooms and rejoining
 npm run test:connections # friends can join rooms while discovery is unavailable (release gate)
 npm run dist:win # Windows installer in dist/

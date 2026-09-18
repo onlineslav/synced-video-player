@@ -17,6 +17,8 @@ import {
 } from './lib.mjs'
 import {captureVideoFrames} from './frames.mjs'
 import {StreamPlayer} from './player.mjs'
+import {YouTubePlayer} from './youtube.mjs'
+import {parseYouTubeUrl} from '../shared/youtube.mjs'
 import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
@@ -29,6 +31,8 @@ import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
   DRAWER,
+  MAX_ITEMS,
+  MAX_REMOVED,
   addItem,
   createPlaylist,
   draggedWidth,
@@ -205,6 +209,10 @@ const ui = {
   leave: $('leave'),
   stage: $('stage'),
   localVideo: $('local-video'),
+  youtubePlayer: $('youtube-player'),
+  mediaUrlForm: $('media-url-form'),
+  mediaUrl: $('media-url'),
+  mediaUrlStatus: $('media-url-status'),
   remoteVideo: $('remote-video'),
   picture: $('picture'),
   captions: $('captions'),
@@ -227,6 +235,7 @@ const ui = {
 }
 
 const player = new StreamPlayer(ui.localVideo)
+const youtube = new YouTubePlayer(ui.youtubePlayer)
 
 const blankSession = () => ({
   code: null,
@@ -512,6 +521,7 @@ async function openRoom(code, joining) {
     if (session.role === 'viewer' && peerId === session.hostId) {
       const previous = session.playlist.current
       const wasPlaying = session.remote?.playing
+      youtube.close()
       session.hostId = null
       session.remote = null
       detachRemoteStream()
@@ -572,6 +582,9 @@ async function leaveRoom() {
   current.imageSend?.abort()
   current.captions.controller?.abort()
   current.ownFiles.clear()
+  ui.mediaUrl.value = ''
+  ui.mediaUrlStatus.hidden = true
+  youtube.close()
   endStroke()
   player.close()
   unpublishStream()
@@ -650,6 +663,7 @@ async function hostFile(filePath, item = null) {
 }
 
 function stopHosting() {
+  youtube.close()
   session.imageSend?.abort()
   session.captions.controller?.abort()
   player.close()
@@ -660,7 +674,28 @@ function stopHosting() {
   setRole('idle')
 }
 
-const hostedTitle = () => session.image?.name || player.media?.title || player.media?.name || null
+const hostedTitle = () => session.image?.name || youtube.title || (youtube.videoId && session.playlist.items.get(session.playing?.id)?.title) || player.media?.title || player.media?.name || null
+
+function hostYouTube(item) {
+  if (!session.room || session.closed) return
+  checkpointPlayback()
+  saveRoom()
+  const resume = session.playlist.progress.get(item.id)
+  const claimedAt = nextRevision(session.claimedAt, session.authority?.claimedAt, session.playlist.revision)
+  stopHosting()
+  session.claimedAt = claimedAt
+  session.authority = {hostId: selfId, claimedAt, sequence: 0}
+  session.sequence = 0
+  session.catalog = new SubtitleCatalog()
+  session.mediaError = null
+  session.playing = {id: item.id, position: item.position}
+  session.hostId = selfId
+  session.remote = null
+  detachRemoteStream()
+  youtube.open(item.youtubeId, resume?.completed ? 0 : resume?.time || 0)
+  setRole('host')
+  broadcastState()
+}
 
 // ---------- Pictures ----------
 // A picture isn't streamed: the host sends the file itself, so everyone sees it at full resolution.
@@ -832,16 +867,17 @@ function hostState() {
     ended: Boolean(session.mediaError),
     error: session.mediaError,
     title: cleanText(hostedTitle(), 200),
-    loading: session.openingMedia || (!media && !session.image && !session.mediaError),
+    loading: session.openingMedia || (!media && !youtube.loaded && !session.image && !session.mediaError),
+    ...(youtube.videoId && {youtubeId: youtube.videoId}),
     image: session.image ? {id: session.image.id} : null,
     playlistId: session.playing?.id || null,
     playlistPosition: session.playing?.position ?? 0,
-    finished: Boolean(video.ended && !session.loop),
+    finished: Boolean((youtube.videoId ? youtube.ended : video.ended) && !session.loop),
     audioOnly: Boolean(media && !media.video),
     playing: hostPlaying(),
-    buffering: hostPlaying() && video.readyState < 3,
-    time: video.currentTime,
-    duration: player.duration,
+    buffering: hostPlaying() && (youtube.videoId ? youtube.buffering : video.readyState < 3),
+    time: currentTime(),
+    duration: currentDuration(),
     loop: session.loop,
     transcoding: player.transcoding,
     audio: (media?.audio || []).slice(0, 128).map((a) => ({value: String(a.index), label: cleanText(a.label, 200) || 'Track'})),
@@ -943,7 +979,7 @@ async function sampleConnection() {
 
 function checkpointPlayback(state = null) {
   if (!state) {
-    if (!isHost() || session.openingMedia || session.mediaError || (!player.loaded && !session.image) || !session.playing) return
+    if (!isHost() || session.openingMedia || session.mediaError || (!player.loaded && !youtube.loaded && !session.image) || !session.playing) return
     session.sequence = nextRevision(session.sequence)
     state = hostState()
   }
@@ -984,6 +1020,7 @@ function broadcastState(target) {
 
 function failHosting(error) {
   if (!isHost() || session.closed) return
+  youtube.close()
   // Keep this claim alive with a terminal state so late/rejoining viewers learn it too.
   session.mediaError = 'The host could not play this media. Open another file to continue.'
   session.openingMedia = false
@@ -997,6 +1034,14 @@ function failHosting(error) {
 }
 
 function applyCommand(cmd, value) {
+  if (youtube.videoId) {
+    if (!['play', 'pause', 'seek', 'loop'].includes(cmd) || !validCommand(cmd, value, {duration: youtube.duration})) return
+    if (cmd === 'loop') session.loop = value
+    else if (cmd === 'seek') { session.epoch++; youtube.seek(value) }
+    else youtube[cmd]()
+    broadcastState()
+    return
+  }
   if (cmd === 'subtitle' && value) { value = session.catalog.resolve(value); if (!value) return }
   if (!player.loaded || !validCommand(cmd, value, player.media)) return
   const video = ui.localVideo
@@ -1042,13 +1087,19 @@ function receiveState(value, peerId) {
   session.role = 'viewer'
   ui.stage.dataset.role = 'viewer'
   if (stopRemovedPlayback()) return
-  if (state.ended || state.image) detachRemoteStream()
-  else attachRemoteStream()
+  if (state.youtubeId && !state.ended) {
+    detachRemoteStream()
+    youtube.sync(state.youtubeId, viewerTime(), state.playing && !state.buffering)
+  } else {
+    youtube.close()
+    if (state.ended || state.image) detachRemoteStream()
+    else attachRemoteStream()
+  }
   render()
 }
 
 function attachRemoteStream() {
-  if (session.role !== 'viewer') return
+  if (session.role !== 'viewer' || session.remote?.youtubeId) return
   const entry = session.peerStreams.get(session.hostId)
   const stream = entry?.claimedAt === session.remote?.claimedAt ? entry.stream : null
   if (stream && ui.remoteVideo.srcObject !== stream) {
@@ -1108,7 +1159,7 @@ const myProfile = () => ({name: myName, username: identity?.username || null, st
 
 // Friends see whether you're in a room, and what you're hosting.
 function myStatus() {
-  const hosting = session.role === 'host' && (player.loaded || Boolean(session.image))
+  const hosting = session.role === 'host' && (player.loaded || youtube.loaded || Boolean(session.image))
   return {inRoom: Boolean(session.room), hosting, title: hosting ? hostedTitle() : null}
 }
 
@@ -1497,6 +1548,11 @@ let boardLayout = null // what the canvas was last fully drawn for
 const boardOpen = () => ui.room.classList.contains('board-open')
 
 function currentPictureRect() {
+  if (youtube.videoId) {
+    const frame = ui.youtubePlayer
+    const rect = pictureRect(frame.clientWidth, frame.clientHeight, 16, 9)
+    return {...rect, x: rect.x + frame.offsetLeft, y: rect.y + frame.offsetTop}
+  }
   const {picture} = ui
   if (shownImage() && picture.complete && picture.naturalWidth) {
     return pictureRect(ui.stage.clientWidth, ui.stage.clientHeight, picture.naturalWidth, picture.naturalHeight)
@@ -1687,7 +1743,7 @@ function ownerPeer(item) {
   if (item.owner === identity?.username) return selfId
   return [...session.peers].find((id) => session.identities.get(id) === item.owner) || null
 }
-const playable = (item) => item.owner === identity?.username
+const playable = (item) => item.youtubeId ? true : item.owner === identity?.username
   ? session.ownFiles.has(item.id) && session.availableFiles.has(item.id)
   : Boolean(session.peerFiles.get(ownerPeer(item))?.has(item.id))
 const ownerName = (item) => (item.owner === identity?.username ? 'you' : session.people.get(ownerPeer(item))?.name || item.ownerName || 'Someone')
@@ -1715,6 +1771,7 @@ async function refreshAvailability() {
 async function playItem(id, from = null) {
   const item = session.playlist.items.get(id)
   if (!item) return
+  if (item.youtubeId) return hostYouTube(item)
   if (item.owner === identity.username) {
     const current = session
     const filePath = session.ownFiles.get(id)
@@ -1995,7 +2052,7 @@ let captionsShown = ''
 function drawCaptions() {
   requestAnimationFrame(drawCaptions)
   const {cues} = session.captions
-  const delayMs = isHost() ? 0 : session.frameDelayMs ?? ((session.playoutDelayMs ?? session.buffer.bufferMs) + (session.link?.rttMs || 0) / 2 + DECODE_DELAY_MS)
+  const delayMs = isHost() || youtube.videoId ? 0 : session.frameDelayMs ?? ((session.playoutDelayMs ?? session.buffer.bufferMs) + (session.link?.rttMs || 0) / 2 + DECODE_DELAY_MS)
   const html = cues.length && session.role !== 'idle' ? captionHtml(cues, currentTime() - delayMs / 1000) : ''
   if (html !== captionsShown) ui.captions.innerHTML = captionsShown = html
 }
@@ -2003,11 +2060,11 @@ function drawCaptions() {
 // ---------- Shared controls ----------
 
 const isHost = () => session.role === 'host'
-const currentTime = () => (isHost() ? ui.localVideo.currentTime : viewerTime())
-const currentDuration = () => (isHost() ? player.duration : session.remote?.duration || 0)
+const currentTime = () => (isHost() ? youtube.videoId ? youtube.time : ui.localVideo.currentTime : viewerTime())
+const currentDuration = () => (isHost() ? youtube.videoId ? youtube.duration : player.duration : session.remote?.duration || 0)
 // A video that reaches its end is paused just before 'ended' fires. With loop on it restarts
 // straight away, so that moment still counts as playing: the UI stays hidden and viewers never see a pause.
-const hostPlaying = () => !ui.localVideo.paused || (session.loop && ui.localVideo.ended)
+const hostPlaying = () => youtube.videoId ? youtube.playing || (session.loop && youtube.ended) : !ui.localVideo.paused || (session.loop && ui.localVideo.ended)
 const isPlaying = () => (isHost() ? hostPlaying() : Boolean(session.remote?.playing))
 
 function control(cmd, value) {
@@ -2058,7 +2115,7 @@ function render() {
   const r = session.remote
   const stale = role === 'viewer' && r && performance.now() - r.receivedAt > HOST_TIMEOUT_MS
   const mediaError = host ? session.mediaError : r?.error
-  const ready = host ? player.loaded || Boolean(session.image) : Boolean(r && !r.loading && !r.ended && !stale)
+  const ready = host ? player.loaded || youtube.loaded || Boolean(session.image) : Boolean(r && !r.loading && !r.ended && !stale)
   const duration = currentDuration()
   const time = currentTime()
 
@@ -2096,13 +2153,17 @@ function render() {
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
   ui.pausedTitle.textContent = ui.title.textContent || resume?.title || ''
-  ui.pausedTitle.hidden = !ui.pausedTitle.textContent || imageMode || !(resume || (ready && !isPlaying()))
+  ui.pausedTitle.hidden = !ui.pausedTitle.textContent || imageMode || Boolean(youtube.videoId) || !(resume || (ready && !isPlaying()))
   const receivingImage = role === 'viewer' && imageMode && !image
   if (receivingImage && performance.now() - session.imageRetryAt > 15_000) {
     session.imageRetryAt = performance.now()
     session.imageRequest.send({id: r.image.id}, {target: session.hostId, signal: session.lifetime.signal}).catch(() => {})
   }
   ui.stage.classList.toggle('showing-image', imageMode)
+  const youtubeMode = Boolean(host ? youtube.videoId : r?.youtubeId)
+  ui.stage.classList.toggle('showing-youtube', youtubeMode)
+  ui.youtubePlayer.hidden = !youtubeMode
+  if (youtubeMode && !host && stale) youtube.pause()
   showPicture(image?.url || null)
 
   ui.stage.classList.toggle('waiting', Boolean(mediaError) || (role === 'viewer' && (!ready || receivingImage)))
@@ -2111,11 +2172,11 @@ function render() {
     ? `Receiving the picture… ${Math.round(progress * 100)}%`
     : role === 'viewer'
       ? 'Your friend is opening something…'
-      : connection.detail || 'Drop a video, song or picture here, or open one to host it.'
+      : connection.problem ? connection.detail : ''
   const audioOnly = ready && (host ? Boolean(player.media && !player.media.video) : Boolean(r?.audioOnly))
   ui.audioOnly.hidden = !audioOnly
   if (audioOnly) ui.audioOnlyTitle.textContent = ui.title.textContent
-  const stalled = host ? player.loaded && hostPlaying() && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
+  const stalled = youtubeMode ? youtube.buffering : host ? player.loaded && hostPlaying() && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
   ui.spinner.hidden = !stalled || Boolean(mediaError) || Boolean(stale)
 
   ui.controls.classList.toggle('disabled', !ready)
@@ -2564,6 +2625,61 @@ for (const button of ui.openButtons) {
   })
 }
 
+let importingYouTube = false
+ui.mediaUrlForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  if (importingYouTube || !session.room || session.closed) return
+  const current = session
+  const importer = new YouTubePlayer(document.createElement('div'))
+  const cleanup = () => importer.close()
+  const status = (text) => {
+    ui.mediaUrlStatus.textContent = text
+    ui.mediaUrlStatus.hidden = !text
+  }
+  try {
+    const {videoId, playlistId} = parseYouTubeUrl(ui.mediaUrl.value)
+    importingYouTube = true
+    ui.mediaUrlForm.querySelector('button').disabled = true
+    status(playlistId ? 'Reading YouTube playlist…' : 'Loading YouTube video…')
+    // Cueing retrieves the source order without starting playback or disturbing the current host.
+    if (playlistId) {
+      importer.container.hidden = true
+      ui.room.append(importer.container)
+    }
+    current.lifetime.signal.addEventListener('abort', cleanup, {once: true})
+    const ids = playlistId ? await importer.importPlaylist(playlistId) : [videoId]
+    if (session !== current || current.closed) return
+    if (ids.length + current.playlist.items.size > MAX_ITEMS || ids.length + current.playlist.items.size + current.playlist.removed.size > MAX_REMOVED) {
+      throw new Error(`This playlist has ${ids.length} videos and will not fit. SVP supports up to ${MAX_ITEMS} items; remove items or use a new room.`)
+    }
+    status('Loading video titles…')
+    const titles = await window.api.youTubeTitles(ids)
+    if (session !== current || current.closed) return
+    // Recheck after fetching: another participant may have added media meanwhile.
+    if (ids.length + current.playlist.items.size > MAX_ITEMS || ids.length + current.playlist.items.size + current.playlist.removed.size > MAX_REMOVED) throw new Error('The room playlist filled up while importing. Remove items and try again.')
+    const added = ids.map((youtubeId, index) => {
+      const message = {id: `${selfId}:${Date.now().toString(36)}:${itemCount++}`, youtubeId,
+        title: titles[index], position: endPosition(current.playlist), ownerName: myName}
+      return addItem(current.playlist, message, identity.username)
+    }).filter(Boolean)
+    // A single snapshot avoids rate-limiting large playlist imports at the receiving peers.
+    current.playlistAction.send({type: 'sync', ...playlistSnapshot(current.playlist)}).catch(() => toast('Could not share the playlist. Rejoin the room to retry.', true))
+    saveRoom()
+    setPlaylistOpen(true)
+    ui.mediaUrl.value = ''
+    status('')
+    if (added.length) hostYouTube(added[0])
+  } catch (error) {
+    if (session === current && !current.closed) status(errorMessage(error))
+  } finally {
+    current.lifetime.signal.removeEventListener('abort', cleanup)
+    importer.container.remove()
+    importer.dispose()
+    importingYouTube = false
+    ui.mediaUrlForm.querySelector('button').disabled = false
+  }
+})
+
 ui.play.addEventListener('click', togglePlay)
 for (const button of document.querySelectorAll('[data-skip]')) {
   button.addEventListener('click', () => skip(Number(button.dataset.skip)))
@@ -2644,6 +2760,7 @@ function routeRemoteAudio(stream) {
 }
 
 function setVolume(volume) {
+  youtube.setVolume(volume)
   const gain = audioOutput().gain
   gain.setTargetAtTime(volume, audio.currentTime, 0.015) // a short ramp, so muting doesn't click
   ui.volume.value = String(volume)
@@ -2740,6 +2857,18 @@ player.addEventListener('session', () => {
 })
 player.addEventListener('loading', () => render())
 player.addEventListener('error', ({detail}) => { if (isHost()) failHosting(detail); else toast(detail, true) })
+
+youtube.addEventListener('ready', () => { if (isHost()) broadcastState() })
+youtube.addEventListener('state', () => render())
+youtube.addEventListener('error', ({detail}) => { if (isHost()) failHosting(detail); else toast(detail, true) })
+youtube.addEventListener('blocked', () => toast('Click Play in the YouTube player to allow playback.'))
+youtube.addEventListener('ended', () => {
+  if (!isHost()) return
+  checkpointPlayback()
+  saveRoom()
+  if (session.loop) { youtube.seek(0); youtube.play() }
+  else playNext()
+})
 
 document.addEventListener('keydown', (event) => {
   if (ui.room.hidden || !ui.settings.hidden || event.target.matches('input:not([type=range]), select, textarea')) return

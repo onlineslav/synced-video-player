@@ -9,6 +9,9 @@ const path = require('node:path')
 const {pathToFileURL} = require('node:url')
 const {execFileSync} = require('node:child_process')
 const esbuild = require('esbuild')
+const {prepareYouTube, registerYouTube} = require('../main/youtube')
+prepareYouTube()
+const checkYouTube = process.argv.includes('--youtube')
 
 const root = path.resolve(__dirname, '..')
 const publicDiscovery = process.argv.includes('--public-discovery')
@@ -23,7 +26,7 @@ async function until(win, condition, timeoutMs = publicDiscovery ? 90000 : 15000
     if (await run(win, condition)) return
     await pause(100)
   }
-  console.error(await run(win, `JSON.stringify({friends:__test.friendNetwork.list(), role:__test.session.role, peers:[...__test.session.peers], remote:__test.session.remote, connection:__test.session.connection, video:{ready:document.getElementById('remote-video').readyState, frames:document.getElementById('remote-video').getVideoPlaybackQuality().totalVideoFrames}, errors:__test.errors})`))
+    console.error(await run(win, `JSON.stringify({friends:__test.friendNetwork.list(), role:__test.session.role, peers:[...__test.session.peers], remote:__test.session.remote, connection:__test.session.connection, video:{ready:document.getElementById('remote-video').readyState, frames:document.getElementById('remote-video').getVideoPlaybackQuality().totalVideoFrames}, streams:[...__test.session.peerStreams].map(([id, entry]) => ({id, claimedAt:entry.claimedAt, tracks:entry.stream.getTracks().map(t => ({kind:t.kind, muted:t.muted, state:t.readyState}))})), errors:__test.errors})`))
   assert.fail(`Timed out: ${condition}`)
 }
 
@@ -89,7 +92,7 @@ async function fixtures() {
         captured.addTrack(replacement);
         captured.dispatchEvent(new MediaStreamTrackEvent('addtrack', {track: replacement}));
       },
-      getState: hostState, selfId, errors: [],
+      getState: hostState, youtube, selfId, errors: [],
     };
     window.addEventListener('error', (e) => __test.errors.push(e.message));
     window.addEventListener('unhandledrejection', (e) => __test.errors.push(String(e.reason)));
@@ -133,7 +136,7 @@ async function fixtures() {
 
 app.whenReady().then(async () => {
   const windows = []
-  const watchdog = setTimeout(() => { console.error('Network integration check timed out'); app.exit(1) }, publicDiscovery ? 240000 : 120000)
+  const watchdog = setTimeout(() => { console.error('Network integration check timed out'); app.exit(1) }, publicDiscovery || checkYouTube ? 240000 : 120000)
   try {
     const {video, picture, sound} = await fixtures()
     require('../main/main').registerIpc()
@@ -142,6 +145,7 @@ app.whenReady().then(async () => {
     for (const name of ['alpha', 'bravo', 'charlie']) {
       const win = new BrowserWindow({show: false, webPreferences: {partition: `network-${name}`, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required', preload: path.join(temporary, 'preload.js')}})
       windows.push(win)
+      if (checkYouTube) registerYouTube(win.webContents.session)
       win.webContents.on('console-message', (details) => {
         if (details.level === 'error' || publicDiscovery && details.level === 'warning') console.error(`${name}: ${details.message}`)
       })
@@ -351,6 +355,48 @@ app.whenReady().then(async () => {
     await connected()
     await until(b, `!__test.session.playlist.items.has(${JSON.stringify(playlistIds[1])}) && __test.session.ownFiles.size === 0`)
     console.log('PASS: Missing files become unavailable; a returning owner’s stale snapshot cannot resurrect a removed item')
+    if (checkYouTube) {
+      await run(a, `document.getElementById('media-url').value = 'https://www.youtube.com/watch?v=M7lc1UVf-VE'; document.getElementById('media-url-form').requestSubmit()`)
+      await Promise.all(windows.map((win) => until(win, '__test.youtube.playing && __test.youtube.time > 1', 45000)))
+      assert.equal(await run(c, '[...__test.session.playlist.items.values()].filter(item => item.youtubeId).length'), 1)
+      await run(b, '__test.control("pause")')
+      await Promise.all(windows.map((win) => until(win, '__test.youtube.state === 2')))
+      await run(c, '__test.control("seek", 15)')
+      await Promise.all(windows.map((win) => until(win, 'Math.abs(__test.youtube.time - 15) < 1.5')))
+      await run(b, '__test.control("play")')
+      await Promise.all(windows.map((win) => until(win, '__test.youtube.playing && __test.youtube.time > 16')))
+      console.log('PASS: Three participants play YouTube directly; viewer pause, seek and resume synchronize')
+      const ytId = await run(a, '__test.session.playing.id')
+      await run(c, `__test.playItem(${JSON.stringify(ytId)})`)
+      await until(c, '__test.session.role === "host" && __test.youtube.playing')
+      await Promise.all([a, b].map((win) => until(win, '__test.session.role === "viewer" && __test.youtube.playing')))
+      await run(c, `__test.hostFile(${JSON.stringify(video)})`)
+      await until(c, 'document.getElementById("local-video").readyState >= 3 && !__test.youtube.frame')
+      await Promise.all([a, b].map((win) => until(win, 'document.getElementById("remote-video").readyState >= 3 && !__test.youtube.frame')))
+      console.log('PASS: YouTube host takeover and switching back to local WebRTC playback clean up embeds')
+      await run(a, `document.getElementById('media-url').value = 'https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE'; document.getElementById('media-url-form').requestSubmit()`)
+      await Promise.all(windows.map((win) => until(win, '[...__test.session.playlist.items.values()].filter(item => item.youtubeId).length === 11', 45000)))
+      const imported = await run(a, '__test.orderedItems(__test.session.playlist).filter(item => item.youtubeId).map(item => item.youtubeId)')
+      for (const win of [b, c]) assert.deepEqual(await run(win, '__test.orderedItems(__test.session.playlist).filter(item => item.youtubeId).map(item => item.youtubeId)'), imported)
+      await run(a, '__test.leaveRoom()')
+      await until(c, '__test.session.peers.size === 1')
+      assert.equal(await run(c, '[...__test.session.playlist.items.values()].filter(item => item.youtubeId).every(__test.playable)'), true)
+      await run(c, `__test.playItem(${JSON.stringify(ytId)})`)
+      await Promise.all([b, c].map((win) => until(win, '__test.youtube.videoId === "M7lc1UVf-VE" && __test.youtube.playing')))
+      console.log('PASS: Entire YouTube playlist imports in matching order on all peers and stays playable after its contributor leaves')
+      await run(c, '__test.control("loop", true); __test.control("seek", __test.youtube.duration - 0.5); __test.control("play")')
+      await until(c, '__test.youtube.playing && __test.youtube.time < 3')
+      await until(b, '__test.session.loop && __test.youtube.playing && __test.youtube.time < 5')
+      await run(c, '__test.control("loop", false)')
+      for (let cycle = 0; cycle < 3; cycle++) {
+        await run(c, `__test.hostFile(${JSON.stringify(video)})`)
+        await until(c, 'document.getElementById("local-video").readyState >= 3 && !__test.youtube.frame')
+        await until(b, 'document.getElementById("remote-video").readyState >= 3 && !__test.youtube.frame')
+        await run(b, `__test.playItem(${JSON.stringify(ytId)})`)
+        await Promise.all([b, c].map((win) => until(win, '__test.youtube.playing')))
+      }
+      console.log('PASS: Shared YouTube loop and three repeated local/YouTube host switches')
+    }
     for (const win of windows) assert.deepEqual(await run(win, '__test.errors'), [])
   } finally {
     clearTimeout(watchdog)

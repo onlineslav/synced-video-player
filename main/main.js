@@ -6,6 +6,7 @@ const {loadIceServers} = require('./turn')
 const updater = require('./updater')
 const {focusWindow} = require('./startup')
 const IMAGES = require('../shared/images.json')
+const {prepareYouTube, registerYouTube, youTubeTitles} = require('./youtube')
 
 const MEDIA_EXTENSIONS = [
   'mkv', 'mp4', 'm4v', 'mov', 'avi', 'webm', 'wmv', 'flv', 'ts', 'm2ts', 'mts',
@@ -50,6 +51,7 @@ const pickFile = (event, name, extensions) => pickFiles(event, name, extensions)
 
 function registerIpc() {
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('youtube:titles', (_event, ids) => youTubeTitles(ids))
   ipcMain.handle('dialog:media', (event) => pickFile(event, 'Media', MEDIA_EXTENSIONS))
   ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))
   ipcMain.handle('dialog:subtitle', (event) => pickFile(event, 'Subtitles', SUBTITLE_EXTENSIONS))
@@ -81,8 +83,10 @@ function registerIpc() {
 }
 
 function start() {
+  prepareYouTube()
   app.on('second-instance', () => focusWindow(BrowserWindow.getAllWindows()[0]))
   app.whenReady().then(() => {
+    registerYouTube()
     registerIpc()
     createWindow()
     media.detectCapabilities() // warm up so the first transcode starts instantly
