@@ -2238,6 +2238,7 @@ ui.leave.addEventListener('click', leaveRoom)
 ui.resumeRoom.addEventListener('click', () => { const item = resumeItem(); if (item) playItem(item.id) })
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
+ui.room.classList.add('board-visible')
 ui.boardVisibility.addEventListener('click', () => {
   const visible = ui.room.classList.toggle('board-visible')
   ui.boardVisibility.setAttribute('aria-pressed', String(visible))

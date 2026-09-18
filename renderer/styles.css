@@ -1590,15 +1590,15 @@ button:disabled {
 }
 
 .media-url-form {
+  position: relative;
   display: flex;
-  gap: 8px;
   width: min(480px, 100%);
 }
 
 .media-url-form input {
   min-width: 0;
   flex: 1;
-  padding: 10px 12px;
+  padding: 10px 44px 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
@@ -1612,6 +1612,39 @@ button:disabled {
 
 .media-url-form input::placeholder {
   color: var(--muted);
+}
+
+.url-submit {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  transition: color 0.15s, background 0.15s;
+}
+
+.url-submit:not(:disabled):hover,
+.url-submit:focus-visible {
+  background: rgba(124, 108, 255, 0.12);
+  color: var(--accent);
+}
+
+.url-submit svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 #media-url-status {
