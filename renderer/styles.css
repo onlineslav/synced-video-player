@@ -930,7 +930,6 @@ button:disabled {
 /* Sits right after the last item, so it's where the next one will go. */
 .playlist-add {
   flex: none;
-  align-self: center;
   width: 36px;
   height: 36px;
   padding: 0;
@@ -940,16 +939,23 @@ button:disabled {
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
-  transition:
-    color 0.15s,
-    border-color 0.15s,
-    background 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.15s;
 }
 
-.playlist-add:hover {
+.playlist-add:hover,
+.playlist-add:focus-visible {
   border-color: var(--accent);
   background: rgba(124, 108, 255, 0.12);
   color: var(--text);
+}
+
+.playlist-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.playlist-add:active {
+  transform: scale(0.94);
 }
 
 .playlist-add svg {
@@ -959,43 +965,84 @@ button:disabled {
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .playlist-add-area {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
 .playlist-add[aria-expanded='true'] {
   border-color: var(--accent);
   color: var(--accent);
+  background: rgba(124, 108, 255, 0.08);
 }
 
-.playlist-add-choices {
+.playlist-add-actions {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
-.playlist-add-choices button {
-  flex: 1;
+.playlist-add-or {
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
 }
 
-.playlist-add-choices button[aria-expanded='true'] {
+.playlist-url-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: grid-template-rows 0.2s ease, opacity 0.16s ease, transform 0.2s ease, visibility 0s 0.2s;
+}
+
+.playlist-add-area.url-open .playlist-url-reveal {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+
+.playlist-url-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+#playlist-url-form {
+  margin-top: 12px;
+}
+
+#playlist-url-form input {
+  font-size: 13px;
+  background: var(--bg);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+#playlist-url-form input:focus {
   border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.18);
 }
 
 .playlist-url-status {
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 12px;
   color: var(--muted);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-#playlist-url-form input {
-  font-size: 13px;
+@media (prefers-reduced-motion: reduce) {
+  .playlist-url-reveal,
+  .playlist-add {
+    transition: none;
+  }
 }
 
 .playlist-items {

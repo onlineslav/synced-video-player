@@ -375,7 +375,7 @@ app.whenReady().then(async () => {
       await Promise.all([a, b].map((win) => until(win, 'document.getElementById("remote-video").readyState >= 3 && !__test.youtube.frame')))
       console.log('PASS: YouTube host takeover and switching back to local WebRTC playback clean up embeds')
       const claimBeforeImport = await run(c, '__test.session.claimedAt')
-      await run(a, `document.getElementById('playlist-add').click(); document.getElementById('playlist-add-url').click(); document.querySelector('#playlist-url-form input').value = 'https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE'; document.getElementById('playlist-url-form').requestSubmit()`)
+      await run(a, `document.getElementById('playlist-add-url').click(); document.querySelector('#playlist-url-form input').value = 'https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE'; document.getElementById('playlist-url-form').requestSubmit()`)
       await Promise.all(windows.map((win) => until(win, '[...__test.session.playlist.items.values()].filter(item => item.youtubeId).length === 11', 45000)))
       const imported = await run(a, '__test.orderedItems(__test.session.playlist).filter(item => item.youtubeId).map(item => item.youtubeId)')
       for (const win of [b, c]) assert.deepEqual(await run(win, '__test.orderedItems(__test.session.playlist).filter(item => item.youtubeId).map(item => item.youtubeId)'), imported)

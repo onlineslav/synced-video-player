@@ -202,8 +202,7 @@ const ui = {
   playlistEdge: $('playlist-edge'),
   playlistAdd: $('playlist-add'),
   playlistAddArea: $('playlist-add-area'),
-  playlistAddChoices: $('playlist-add-choices'),
-  playlistAddFiles: $('playlist-add-files'),
+  playlistUrlReveal: $('playlist-url-reveal'),
   playlistAddUrl: $('playlist-add-url'),
   playlistUrlForm: $('playlist-url-form'),
   playlistUrlStatus: $('playlist-url-status'),
@@ -2379,33 +2378,32 @@ try {
 }
 
 function setPlaylistAddOpen(open) {
-  ui.playlistAdd.setAttribute('aria-expanded', String(open))
-  ui.playlistAddChoices.hidden = !open
-  if (!open) {
-    ui.playlistUrlForm.hidden = true
-    ui.playlistAddUrl.setAttribute('aria-expanded', 'false')
-  }
+  ui.playlistAddArea.classList.toggle('url-open', open)
+  ui.playlistUrlReveal.inert = !open
+  ui.playlistAddUrl.setAttribute('aria-expanded', String(open))
 }
-ui.playlistAdd.addEventListener('click', () => setPlaylistAddOpen(ui.playlistAddChoices.hidden))
-ui.playlistAddFiles.addEventListener('click', async () => {
+ui.playlistAdd.addEventListener('click', async () => {
   const current = session
   setPlaylistAddOpen(false)
   const paths = await window.api.chooseMediaFiles()
   if (session === current && !current.closed) addToPlaylist(paths)
 })
 ui.playlistAddUrl.addEventListener('click', () => {
-  const open = ui.playlistUrlForm.hidden
-  ui.playlistUrlForm.hidden = !open
-  ui.playlistAddUrl.setAttribute('aria-expanded', String(open))
-  if (open) ui.playlistUrlForm.querySelector('input').focus()
+  const open = ui.playlistAddUrl.getAttribute('aria-expanded') !== 'true'
+  setPlaylistAddOpen(open)
+  if (open) {
+    const input = ui.playlistUrlForm.querySelector('input')
+    input.focus()
+    input.select()
+  }
 })
 document.addEventListener('pointerdown', (event) => {
-  if (!ui.playlistAddArea.contains(event.target)) setPlaylistAddOpen(false)
+  if (!ui.playlistAddArea.contains(event.target) && !ui.playlistUrlForm.querySelector('input').value.trim() && !ui.playlistUrlForm.querySelector('button').disabled) setPlaylistAddOpen(false)
 })
 ui.playlistAddArea.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
   setPlaylistAddOpen(false)
-  ui.playlistAdd.focus()
+  ui.playlistAddUrl.focus()
 })
 
 // Reordering, like Spotify: hold a row and drag it. It follows the pointer (kept inside the list), the
