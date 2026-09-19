@@ -1,13 +1,17 @@
-## What's new in 0.4.3
+## What's new in 0.5.0
+
+**Synced Video Player is now Watch With Friends.** Updating keeps everything: your
+username, friends list and saved rooms carry over on first launch, and you stay
+connected to friends still on 0.4.
 
 Windows installs the update automatically; on a Mac, use the download button on the home screen.
 
-- **YouTube playback:** add individual videos or full playlists by URL and watch them together with synchronized playback controls.
-- **Faster playlist building:** add local files or YouTube links from the playlist sidebar, or drag a YouTube URL directly into the app.
-- **Persistent media preview:** reopening a saved room restores its last media item and progress as a paused local preview.
-- **Safer playlist changes:** newly added media starts paused, and removing the current item selects the next available item without unexpectedly starting playback.
-- **Annotation visibility:** annotations are shown by default and have a persistent visibility toggle with a smoother hover reveal.
-- **Clearer room controls:** the home screen now makes permanent room departure explicit.
+- **UI scale:** Ctrl and `+` / `-` / `0` or Ctrl and the scroll wheel resize the whole app, and Settings has a slider and a typed percent for anything between 50% and 200%.
+- **Drop a YouTube link on the video** to play it, the same as dropping a file.
+- **Steadier drawing:** the pen no longer stops mid-line, and each tool has its own cursor.
+- **Playlist rows show position out of total**, so you can see how far into an item you are without opening it.
+- **Tidier home screen:** a long list of saved rooms scrolls on its own instead of pushing the page, the edges light up under the pointer, and the version label links to the project page.
+- **Room name** has a clearer field that saves with a checkmark, and the people sidebar closes when you click away from it.
 
 ## Download
 
