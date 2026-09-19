@@ -84,11 +84,13 @@
       <div class="home-card">
         <h1>Synced Video Player</h1>
         <p class="lede">Watch together. Whoever opens a video, song or picture hosts it, and both of you control playback.</p>
-        <button id="create" class="primary big">Create a room</button>
+        <button id="create" class="primary big sheen">Create a room</button>
         <div class="divider">or join one</div>
         <form id="join-form" class="join">
-          <input id="join-code" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false" aria-label="Room code" />
-          <button type="submit">Join</button>
+          <label class="join-field sheen">
+            <input id="join-code" placeholder="ABCD-EFGH" maxlength="9" autocomplete="off" spellcheck="false" aria-label="Room code" />
+          </label>
+          <button type="submit" class="sheen">Join</button>
         </form>
         <section id="saved-rooms" class="saved-rooms" hidden>
           <h2>Your rooms</h2>

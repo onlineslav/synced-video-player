@@ -369,7 +369,7 @@ function renderSavedRooms() {
   ui.savedRooms.hidden = !rooms.length
   ui.savedRoomItems.replaceChildren(...rooms.map((saved) => {
     const row = element('li', 'saved-room')
-    const open = element('button', 'saved-room-open')
+    const open = element('button', 'saved-room-open sheen')
     open.dataset.code = saved.code
     const current = saved.playlist.items.get(saved.playlist.current?.id)
     const progress = current && saved.playlist.progress.get(current.id)
@@ -2538,6 +2538,16 @@ try {
 } catch {
   setPeopleOpen(true)
 }
+
+// The hover sheen follows the pointer (`.sheen` in styles.css). One listener on home covers the
+// saved-room rows too, which are rebuilt whenever the list changes.
+ui.home.addEventListener('pointermove', (event) => {
+  const shape = event.target.closest?.('.sheen')
+  if (!shape) return
+  const box = shape.getBoundingClientRect()
+  shape.style.setProperty('--sheen-x', `${event.clientX - box.left}px`)
+  shape.style.setProperty('--sheen-y', `${event.clientY - box.top}px`)
+})
 
 for (const handle of [ui.playlistTab, ui.playlistEdge]) {
   const trackPlaylistHover = (event) => {
