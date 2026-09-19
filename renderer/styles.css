@@ -940,7 +940,7 @@ button:disabled {
   padding: 0;
   display: grid;
   place-items: center;
-  border: 1.5px solid var(--line);
+  border: 2px solid var(--line);
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
@@ -964,13 +964,19 @@ button:disabled {
 }
 
 .playlist-add svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* The plus is drawn 1:1 at 18px; the link's 24 viewBox needs a thicker
+   nominal stroke to land on the same 2px as the plus and the rings. */
+#playlist-add-url svg {
+  stroke-width: 2.667;
 }
 
 .playlist-add-area {
@@ -994,7 +1000,7 @@ button:disabled {
 
 .playlist-add-or {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   user-select: none;
 }
 
