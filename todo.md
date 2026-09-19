@@ -1,4 +1,7 @@
 
+Video Screen - Open Media or Enter Link
+
+
 add loop button (synced)
 change word 'video' to 'media' and allow all media types.
 
@@ -8,9 +11,11 @@ change word 'video' to 'media' and allow all media types.
 don't say "Resume <filename> just say resume from timestamp. When paused, show the name of the file on top of the screen (like in Plex or VLC) - make it translucent, more opaque as you hover over it.
 - don't do the resume prompt if it's at 0:00
 
-- [x] Fix 0.4 connection regression: "Connection unavailable · retrying" and room joining stuck while both friends are online (fixed in 0.4.1)
+bug: says connection unavailable retrying for both me and my friend (we're both online)
 
-- split subs and dubs
+Says Joining your friend's room waiting for connection
+
+- split subs and dubs i.e: one person can watch subs and another dubs
 
 Names
 watch3gether
@@ -19,6 +24,8 @@ mediasync
 syncplay
 watch3gether
 witchparty
+
+Watch With Friends
 
 - bruh, uwu, air horn
 

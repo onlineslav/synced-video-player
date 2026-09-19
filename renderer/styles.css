@@ -141,13 +141,41 @@ button.ghost {
 
 /* Home */
 
+/* The card keeps its heading, Create and Join fixed; only the room list scrolls,
+   so a long list never puts a scrollbar over the whole home screen. */
 .saved-rooms {
   margin-top: 28px;
   text-align: left;
 }
 
-.saved-rooms h2 { font-size: 18px; margin-bottom: 6px; }
-.saved-room-items { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; }
+#home > .home-card > .saved-rooms {
+  display: flex;
+  flex-direction: column;
+  /* Shrinks when the list is long, but never grows past its rooms, so a short list
+     keeps the card its natural height and centred. */
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.saved-rooms h2 { font-size: 18px; margin-bottom: 6px; flex: none; }
+.saved-room-items { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; align-content: start; }
+#home > .home-card > .saved-rooms > .saved-room-items {
+  flex: 0 1 auto;
+  /* One row's worth: in a window too short even for the card's header, the page
+     scrolls rather than the list collapsing to nothing. */
+  min-height: 66px;
+  overflow-y: auto;
+  /* The list scrolls under its own slim bar, kept clear of each row's leave button. */
+  padding-right: 8px;
+  margin-right: -8px;
+}
+/* Chromium ignores ::-webkit-scrollbar once scrollbar-width is set, so the bar is
+   styled only this way (Electron is Chromium-only). */
+.saved-room-items::-webkit-scrollbar { width: 8px; }
+.saved-room-items::-webkit-scrollbar-track { background: transparent; }
+.saved-room-items::-webkit-scrollbar-button { display: none; }
+.saved-room-items::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+.saved-room-items::-webkit-scrollbar-thumb:hover { background: #3a3a48; }
 .saved-room { position: relative; }
 .saved-room-open { width: 100%; display: grid; gap: 5px; text-align: left; padding: 14px 52px 14px 14px; white-space: normal; }
 /* Panel-coloured shapes take a faintly violet sheen so it reads as the app's light, not a grey wash. */
@@ -177,10 +205,14 @@ button.ghost {
 .leave-room-confirm:hover { background: #ff8585; border-color: #ff8585; }
 .leave-room-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
+/* Flex centring, not grid: a grid's auto row is sized by its content, so the card's
+   max-height: 100% would resolve against its own height and never cap it. Every other
+   child here (corner, pin, version, invites, friends drawer) is position: fixed. */
 .home {
   height: 100%;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
   overflow: auto;
   transition: padding-left 0.2s;
@@ -680,6 +712,11 @@ button.small {
   gap: 16px;
   text-align: center;
 }
+
+/* Only the home screen's card is capped to the window, so its room list is what
+   scrolls. Everything above the list keeps its natural height. */
+#home > .home-card { max-height: 100%; }
+#home > .home-card > * { flex: none; }
 
 button:disabled {
   opacity: 0.45;
