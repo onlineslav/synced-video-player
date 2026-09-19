@@ -1666,22 +1666,92 @@ button:disabled {
 
 .room-name-form {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 16px;
 }
 
 .room-name-form label {
   font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.room-name-field {
+  position: relative;
+  display: flex;
+}
+
+.room-name-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  transition: padding-right 0.15s;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.room-name-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.room-name-field input::placeholder {
   color: var(--muted);
 }
 
-.room-name-form input {
-  width: 100%;
-  min-width: 0;
+.room-name-save {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #fff;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-50%) translateX(4px);
+  transition:
+    opacity 0.15s,
+    transform 0.15s,
+    background 0.15s,
+    color 0.15s,
+    visibility 0.15s;
 }
 
-.room-name-form button {
-  justify-self: start;
+.room-name-form.unsaved .room-name-field input {
+  padding-right: 32px;
+}
+
+.room-name-form.unsaved .room-name-save {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.room-name-save:hover,
+.room-name-save:focus-visible {
+  background: transparent;
+  color: #fff;
+  opacity: 0.75;
+}
+
+.room-name-save svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .people {

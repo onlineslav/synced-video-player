@@ -261,8 +261,12 @@
       <aside id="sidebar" class="sidebar">
         <form id="room-name-form" class="room-name-form">
           <label for="room-name">Room name</label>
-          <input id="room-name" maxlength="80" autocomplete="off" spellcheck="false" />
-          <button class="small" type="submit">Save name</button>
+          <div class="room-name-field">
+            <input id="room-name" maxlength="80" autocomplete="off" spellcheck="false" />
+            <button class="room-name-save" type="submit" title="Save the room name" aria-label="Save the room name">
+              <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+            </button>
+          </div>
         </form>
         <h2>In the room</h2>
         <ul id="people" class="people"></ul>

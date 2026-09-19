@@ -23,7 +23,7 @@ import {roomConnection} from './connection.mjs'
 import {FriendNetwork, presenceText} from './friends.mjs'
 import {HANDLE_HINT, createIdentity, createKeys, isValidIdentity, normalizeHandle, normalizeUsername, usernameFor} from './identity.mjs'
 import {cleanDisplayName, cleanText} from './profile.mjs'
-import {cleanRoomDetails, newerRoomDetails, renameRoom} from './room-name.mjs'
+import {cleanRoomDetails, MAX_ROOM_NAME_LENGTH, newerRoomDetails, renameRoom} from './room-name.mjs'
 import {RoomHistory} from './room-history.mjs'
 import {RoomPresence} from './room-presence.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
@@ -1557,6 +1557,7 @@ function element(tag, className, text) {
 function renderPeople() {
   if (document.activeElement !== ui.roomName) ui.roomName.value = session.details?.name || ''
   ui.roomName.placeholder = session.connection.joining ? 'Joining room…' : 'Room name'
+  syncRoomNameSave()
   const host = isHost()
   const hostId = host ? selfId : session.hostId
   const me = {id: selfId, self: true, name: myName, username: identity?.username, ...(host ? {sender: session.link?.sender} : {receiver: session.role === 'viewer' ? session.link?.receiver : null})}
@@ -2512,6 +2513,12 @@ ui.board.addEventListener('pointercancel', endStroke)
 window.addEventListener('resize', () => syncBoardLayout())
 
 ui.peopleToggle.addEventListener('click', () => setPeopleOpen(!ui.room.classList.contains('people-open')))
+function syncRoomNameSave() {
+  const typed = cleanText(ui.roomName.value, MAX_ROOM_NAME_LENGTH)
+  const unsaved = Boolean(typed) && typed !== (session.details?.name || '')
+  ui.roomNameForm.classList.toggle('unsaved', unsaved)
+}
+
 function saveRoomName() {
   if (!session.room) return
   const details = renameRoom(ui.roomName.value, session.details, selfId)
@@ -2521,16 +2528,19 @@ function saveRoomName() {
     session.detailsAction.send(session.details).catch(() => toast('Room name could not be shared. Try again.', true))
   }
   ui.roomName.value = session.details?.name || ''
+  syncRoomNameSave()
 }
 ui.roomNameForm.addEventListener('submit', (event) => {
   event.preventDefault()
   saveRoomName()
   ui.roomName.blur()
 })
+ui.roomName.addEventListener('input', syncRoomNameSave)
 ui.roomName.addEventListener('change', saveRoomName)
 ui.roomName.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
   ui.roomName.value = session.details?.name || ''
+  syncRoomNameSave()
   ui.roomName.blur()
 })
 try {
