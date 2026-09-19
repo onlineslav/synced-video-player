@@ -180,7 +180,6 @@ const ui = {
   link: $('link'),
   linkWarning: $('link-warning'),
   linkWarningTip: $('link-warning-tip'),
-  title: $('title'),
   pausedTitle: $('paused-title'),
   role: $('role'),
   peopleToggle: $('people-toggle'),
@@ -2217,13 +2216,13 @@ function render() {
   const problem = connection.problem || stale || Boolean(network.error) || (health && health.level !== 'good')
   ui.linkWarning.hidden = !problem
   if (problem) ui.linkWarningTip.textContent = stale ? 'The host stopped responding. Waiting for playback to recover.' : network.error || (connection.problem ? connection.detail : health?.detail)
-  ui.title.textContent = (host ? hostedTitle() : r?.title) || ''
+  const title = (host ? hostedTitle() : r?.title) || ''
   const converting = (host ? player.transcoding : r?.transcoding) ? ' · converting' : ''
   ui.role.textContent = {host: session.preview ? 'Ready to resume' : `Hosting${converting}`, viewer: `Watching${converting}`, idle: session.connection.joining && !peerCount ? 'Joining room' : ''}[role]
 
   const image = shownImage()
   const imageMode = Boolean(host ? session.image : r?.image)
-  ui.pausedTitle.textContent = ui.title.textContent || resume?.title || ''
+  ui.pausedTitle.textContent = title || resume?.title || ''
   ui.pausedTitle.hidden = !ui.pausedTitle.textContent || imageMode || Boolean(youtube.videoId) || !(resume || (ready && !isPlaying()))
   const receivingImage = role === 'viewer' && imageMode && !image
   if (receivingImage && performance.now() - session.imageRetryAt > 15_000) {
@@ -2246,7 +2245,7 @@ function render() {
       : connection.problem ? connection.detail : ''
   const audioOnly = ready && (host ? Boolean(player.media && !player.media.video) : Boolean(r?.audioOnly))
   ui.audioOnly.hidden = !audioOnly
-  if (audioOnly) ui.audioOnlyTitle.textContent = ui.title.textContent
+  if (audioOnly) ui.audioOnlyTitle.textContent = title
   const stalled = youtubeMode ? youtube.buffering : host ? player.loaded && hostPlaying() && ui.localVideo.readyState < 3 : role === 'viewer' && (r?.buffering || (ready && ui.remoteVideo.readyState < 2))
   ui.spinner.hidden = !stalled || Boolean(mediaError) || Boolean(stale)
 

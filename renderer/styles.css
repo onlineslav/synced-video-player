@@ -1600,14 +1600,10 @@ button:disabled {
   background: var(--danger);
 }
 
-.title {
+/* The media title lives under the picture, not in the top bar; this just holds the gap open. */
+.topbar-spacer {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: center;
-  font-size: 14px;
 }
 
 .role {
