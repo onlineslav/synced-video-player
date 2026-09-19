@@ -1882,17 +1882,41 @@ function resumeItem() {
   return (current && nextItem(session.playlist, current, playable)) || orderedItems(session.playlist).find(playable) || null
 }
 
+// A row says where its playback stands: the live clock for what's playing, the saved checkpoint
+// otherwise. No "Playing" label — the row is highlighted and the time is moving.
+function playlistStatus({item, current, available, owner, progress}) {
+  const live = current && session.role !== 'idle'
+  const time = live ? currentTime() : progress?.time
+  const duration = live ? currentDuration() : progress?.duration
+  const position = !live && progress?.completed ? 'Finished'
+    : live || progress ? `${formatTime(time)}${duration ? `/${formatTime(duration)}` : ''}` : ''
+  return `${!available ? 'Unavailable · ' : ''}Added by ${owner}${position ? ` · ${position}` : ''}`
+}
+
+// Rewrite the status lines in place, matching by id so a half-dragged list still updates.
+function paintPlaylistStatus(rows) {
+  const statuses = new Map(rows.map((row) => [row.item.id, playlistStatus(row)]))
+  for (const row of ui.playlistItems.children) {
+    const stats = row.querySelector('.person-stats')
+    const status = statuses.get(row.dataset.id)
+    if (stats && status != null && stats.textContent !== status) stats.textContent = status
+  }
+}
+
 function renderPlaylist() {
   const items = orderedItems(session.playlist)
   const current = isHost() ? session.playing?.id : session.remote?.playlistId || session.playlist.current?.id
   ui.playlistEmpty.hidden = items.length > 0
   const rows = items.map((item) => ({item, current: item.id === current, available: playable(item), owner: ownerName(item), progress: session.playlist.progress.get(item.id)}))
-  const signature = JSON.stringify(rows.map(({item, current, available, owner, progress}) => [item.id, item.title, current, available, owner, Math.floor(progress?.time || 0), progress?.completed]))
+  // The playing row's position comes from the clock, so it's painted every render and left out of
+  // the signature; rebuilding the list four times a second would throw away focus and hover.
+  const signature = JSON.stringify(rows.map(({item, current, available, owner, progress}) => [item.id, item.title, current, available, owner,
+    ...(current ? [] : [Math.floor(progress?.time || 0), Math.floor(progress?.duration || 0), progress?.completed])]))
   // Don't rebuild the rows under someone dragging one; the list catches up when they let go.
-  if (ui.playlistItems.dataset.signature === signature || itemDrag) return
+  if (ui.playlistItems.dataset.signature === signature || itemDrag) return paintPlaylistStatus(rows)
   ui.playlistItems.dataset.signature = signature
   ui.playlistItems.replaceChildren(
-    ...rows.map(({item, current, available, owner, progress}) => {
+    ...rows.map(({item, current, available}, index) => {
       const row = element('li', 'playlist-item')
       row.dataset.id = item.id
       row.title = 'Drag to reorder'
@@ -1905,8 +1929,7 @@ function renderPlaylist() {
       play.setAttribute('aria-label', `Play ${item.title}`)
       play.addEventListener('click', () => playItem(item.id))
       const main = element('div', 'person-main')
-      const status = `${!available ? 'Unavailable · ' : current && session.role !== 'idle' ? 'Playing · ' : ''}Added by ${owner}${progress ? ` · ${progress.completed ? 'Finished' : formatTime(progress.time)}` : ''}`
-      main.append(element('div', 'person-name', item.title), element('div', 'person-stats', status))
+      main.append(element('div', 'person-name', item.title), element('div', 'person-stats', playlistStatus(rows[index])))
       main.firstChild.title = item.title
       const remove = element('button', 'playlist-remove', '×')
       remove.title = 'Remove for everyone'
