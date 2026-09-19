@@ -124,7 +124,12 @@
           <h2>Display name</h2>
           <div class="settings-profile">
             <span id="profile-avatar" class="avatar big-avatar">?</span>
-            <input id="profile-name" class="settings-name" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Your display name" />
+            <div class="save-field">
+              <input id="profile-name" class="settings-name" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Your display name" />
+              <button class="field-save" type="button" title="Save your display name" aria-label="Save your display name">
+                <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+              </button>
+            </div>
           </div>
           <p class="hint">What people see. You can change it any time.</p>
         </section>
@@ -261,9 +266,9 @@
       <aside id="sidebar" class="sidebar">
         <form id="room-name-form" class="room-name-form">
           <label for="room-name">Room name</label>
-          <div class="room-name-field">
+          <div class="save-field room-name-field">
             <input id="room-name" maxlength="80" autocomplete="off" spellcheck="false" />
-            <button class="room-name-save" type="submit" title="Save the room name" aria-label="Save the room name">
+            <button class="field-save" type="submit" title="Save the room name" aria-label="Save the room name">
               <svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
             </button>
           </div>

@@ -478,6 +478,11 @@ button.ghost {
   gap: 12px;
 }
 
+.settings-profile .save-field {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-name {
   flex: 1;
   min-width: 0;
@@ -1056,6 +1061,12 @@ button:disabled {
 .playlist-edge:hover::after,
 .room.resizing .playlist-edge::after {
   opacity: 0.7;
+}
+
+/* Opening sweeps the edge out from under a pointer resting on the tab, which flashed the glow for a
+   frame or two. A short delay outlasts that crossing and is imperceptible on a real hover. */
+.playlist-edge:hover::after {
+  transition-delay: 0.08s;
 }
 
 .room:not(.playlist-open) .playlist-edge {
@@ -1678,32 +1689,23 @@ button:disabled {
   letter-spacing: 0.08em;
 }
 
-.room-name-field {
+/* A text field that offers a checkmark on its right edge while what's typed isn't saved yet. */
+.save-field {
   position: relative;
   display: flex;
 }
 
-.room-name-field input {
+.save-field input {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
   transition: padding-right 0.15s;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
 }
 
-.room-name-field input:focus {
-  outline: none;
-  border-color: var(--accent);
+.save-field.unsaved input {
+  padding-right: 34px;
 }
 
-.room-name-field input::placeholder {
-  color: var(--muted);
-}
-
-.room-name-save {
+.field-save {
   position: absolute;
   right: 6px;
   top: 50%;
@@ -1722,29 +1724,22 @@ button:disabled {
   transition:
     opacity 0.15s,
     transform 0.15s,
-    background 0.15s,
-    color 0.15s,
     visibility 0.15s;
 }
 
-.room-name-form.unsaved .room-name-field input {
-  padding-right: 32px;
-}
-
-.room-name-form.unsaved .room-name-save {
+.save-field.unsaved .field-save {
   visibility: visible;
   opacity: 1;
   transform: translateY(-50%) translateX(0);
 }
 
-.room-name-save:hover,
-.room-name-save:focus-visible {
+.field-save:hover,
+.field-save:focus-visible {
   background: transparent;
-  color: #fff;
   opacity: 0.75;
 }
 
-.room-name-save svg {
+.field-save svg {
   width: 17px;
   height: 17px;
   fill: none;
@@ -1752,6 +1747,23 @@ button:disabled {
   stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.room-name-field input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.room-name-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.room-name-field input::placeholder {
+  color: var(--muted);
 }
 
 .people {

@@ -1253,6 +1253,7 @@ function saveIdentity(next) {
 
 function renderProfile() {
   if (document.activeElement !== ui.profileName) ui.profileName.value = myName
+  syncNameSave(ui.profileName)
   ui.profileAvatar.textContent = myName.trim()[0]?.toUpperCase() || '?'
   ui.username.textContent = ui.settingsUsername.textContent = identity?.username || '…'
 }
@@ -1270,15 +1271,33 @@ function setMyName(input) {
   render()
 }
 
+// The checkmark in the field only shows while what's typed would change the saved name.
+function syncNameSave(input) {
+  const name = cleanDisplayName(input.value)
+  markUnsaved(input, Boolean(name) && name !== myName)
+}
+
+function markUnsaved(input, unsaved) {
+  input.closest('.save-field')?.classList.toggle('unsaved', unsaved)
+}
+
 function bindNameInput(input) {
-  input.addEventListener('change', () => {
+  const save = () => {
     setMyName(input.value)
     // Show the name as saved: cleaned up, or the previous one if this was blank.
     input.value = myName
-  })
+    syncNameSave(input)
+  }
+  input.addEventListener('input', () => syncNameSave(input))
+  input.addEventListener('change', save)
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') input.value = myName
     if (event.key === 'Enter' || event.key === 'Escape') input.blur()
+    if (event.key === 'Escape') syncNameSave(input)
+  })
+  input.closest('.save-field')?.querySelector('.field-save')?.addEventListener('click', () => {
+    save()
+    input.blur()
   })
 }
 
@@ -2513,10 +2532,13 @@ ui.board.addEventListener('pointercancel', endStroke)
 window.addEventListener('resize', () => syncBoardLayout())
 
 ui.peopleToggle.addEventListener('click', () => setPeopleOpen(!ui.room.classList.contains('people-open')))
+document.addEventListener('pointerdown', (event) => {
+  // Clicking anywhere off the sidebar puts it away. The toggle is left out so its own click still toggles.
+  if (ui.room.classList.contains('people-open') && !event.target.closest('.sidebar, .people-toggle')) setPeopleOpen(false)
+})
 function syncRoomNameSave() {
   const typed = cleanText(ui.roomName.value, MAX_ROOM_NAME_LENGTH)
-  const unsaved = Boolean(typed) && typed !== (session.details?.name || '')
-  ui.roomNameForm.classList.toggle('unsaved', unsaved)
+  markUnsaved(ui.roomName, Boolean(typed) && typed !== (session.details?.name || ''))
 }
 
 function saveRoomName() {
@@ -3274,7 +3296,10 @@ document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
   setReactionsOpen(false)
   endItemDrag(false)
-  if (!event.target.matches('input')) showSettings(false) // in the name box, Escape only undoes the edit
+  if (!event.target.matches('input')) {
+    showSettings(false) // in the name box, Escape only undoes the edit
+    setPeopleOpen(false)
+  }
 })
 
 // While a video plays, the top bar, sidebar and controls get out of the way until the mouse moves.
