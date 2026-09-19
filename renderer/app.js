@@ -187,6 +187,7 @@ const ui = {
   people: $('people'),
   roomNameForm: $('room-name-form'),
   roomName: $('room-name'),
+  boardMenu: $('board-menu'),
   boardToggle: $('board-toggle'),
   boardVisibility: $('board-visibility'),
   board: $('board'),
@@ -1655,14 +1656,59 @@ function receiveBoard(message, peerId) {
   }
 }
 
-function boardPoints(event) {
+// Samples closer together than this (in picture heights) are dropped: a high-rate pointer reports
+// hundreds of near-identical positions a second, which fills a stroke without drawing anything more.
+const MIN_POINT_STEP = 0.002
+
+// `previous` is the last coordinate pair already in the stroke, so decimation carries across events.
+function boardPoints(event, previous) {
   const box = ui.stage.getBoundingClientRect()
   const rect = currentPictureRect()
   const events = event.getCoalescedEvents?.() || []
-  return (events.length ? events : [event]).flatMap((e) => [
-    Math.round(((e.clientX - box.left - rect.x) / rect.width) * 10000) / 10000,
-    Math.round(((e.clientY - box.top - rect.y) / rect.height) * 10000) / 10000,
-  ])
+  const aspect = rect.height ? rect.width / rect.height : 1
+  const points = []
+  let last = previous
+  for (const e of events.length ? events : [event]) {
+    const x = Math.round(((e.clientX - box.left - rect.x) / rect.width) * 10000) / 10000
+    const y = Math.round(((e.clientY - box.top - rect.y) / rect.height) * 10000) / 10000
+    if (last) {
+      const dx = (x - last[0]) * aspect
+      const dy = y - last[1]
+      if (dx * dx + dy * dy < MIN_POINT_STEP * MIN_POINT_STEP) continue
+    }
+    points.push(x, y)
+    last = [x, y]
+  }
+  return points
+}
+
+const lastPoint = (stroke) => (stroke.points.length >= 2 ? stroke.points.slice(-2) : null)
+
+// Starts the stroke this person is drawing, flushing whatever the previous one still owes.
+function startStroke(points, color, size) {
+  sendStroke()
+  const id = `${selfId}:${Date.now().toString(36)}:${strokeCount++}`
+  const stroke = addStrokeChunk(session.board, {id, color, size, at: nextRevision(session.board.revision), points})
+  drawing = stroke ? {stroke, sent: 0} : null
+  return Boolean(stroke)
+}
+
+// A stroke holds at most MAX_COORDINATES coordinates. When one fills up the line continues as a new
+// stroke that begins at the last point, so a long drawing carries on instead of stopping dead.
+function extendStroke(points) {
+  let rest = points
+  while (rest.length) {
+    const {stroke} = drawing
+    const room = MAX_COORDINATES - stroke.points.length
+    if (room <= 0) {
+      if (!startStroke(lastPoint(stroke), stroke.color, stroke.size)) return false
+      continue
+    }
+    const chunk = rest.slice(0, room)
+    rest = rest.slice(room)
+    if (!addStrokeChunk(session.board, {...stroke, offset: stroke.points.length, points: chunk})) return false
+  }
+  return true
 }
 
 function sendStroke() {
@@ -1679,6 +1725,14 @@ function endStroke() {
   drawing = null
 }
 
+// The board holds MAX_STROKES strokes. Say so instead of letting the pen go quiet.
+let boardFullAt = 0
+function boardFull() {
+  if (Date.now() - boardFullAt < 5000) return
+  boardFullAt = Date.now()
+  toast('The board is full — clear it to keep drawing')
+}
+
 function clearBoardForEveryone() {
   // Cover strokes stamped by a clock slightly ahead of ours, too.
   const at = nextRevision(session.board.revision, session.board.clearedAt)
@@ -1687,16 +1741,72 @@ function clearBoardForEveryone() {
   syncBoardLayout(true)
 }
 
+// The visibility eye hangs under the whiteboard button. It follows the pointer rather than :hover,
+// so a click can't leave it focused and stuck open, and it closes when drawing is switched off.
+let boardMenuTimer = null
+function holdBoardMenu() {
+  clearTimeout(boardMenuTimer)
+  boardMenuTimer = null
+  ui.boardMenu.classList.add('menu-open')
+}
+function releaseBoardMenu(delay = 400) {
+  clearTimeout(boardMenuTimer)
+  boardMenuTimer = setTimeout(() => ui.boardMenu.classList.remove('menu-open'), delay)
+}
+
 function setBoardOpen(open) {
   endStroke()
+  if (!open) releaseBoardMenu(0)
   ui.room.classList.toggle('board-open', open)
   ui.boardToggle.setAttribute('aria-pressed', String(open))
   if (open) ui.boardToggle.classList.remove('activity')
   renderTools()
 }
 
+// The cursor is the tool in your hand: a pencil whose body carries the colour you're drawing in, and
+// an eraser cut on the same diagonal. The silhouette does the contrast work — a soft dark halo under a
+// thin white outline — so it reads over black, white or anything between. The segments inside it
+// (graphite, bare wood, ferrule, rubber) are what make it read as a pencil rather than a wedge.
+const PENCIL = {
+  hot: '3 29',
+  outline: 'M3 29 L6.61 21.29 L25.7 2.2 L29.8 6.3 L10.71 25.39 Z',
+  // Tip last, so it paints over the segment behind it. A null fill takes the drawing colour.
+  parts: [
+    ['M22.16 5.74 L25.7 2.2 L29.8 6.3 L26.26 9.84 Z', '#efa3a3'],
+    ['M19.33 8.56 L22.16 5.74 L26.26 9.84 L23.44 12.67 Z', '#c8ccd4'],
+    ['M6.61 21.29 L19.33 8.56 L23.44 12.67 L10.71 25.39 Z', null],
+    ['M3 29 L6.61 21.29 L10.71 25.39 Z', '#f1e3c6'],
+    ['M3 29 L4.58 25.63 L6.37 27.42 Z', '#33333d'],
+  ],
+  seams: ['M6.61 21.29 L10.71 25.39', 'M19.33 8.56 L23.44 12.67', 'M22.16 5.74 L26.26 9.84'],
+}
+const RUBBER = {
+  hot: '4 28',
+  outline: 'M1.74 25.74 L15.88 11.6 L20.4 16.12 L6.26 30.26 Z',
+  parts: [
+    ['M6.33 21.14 L15.88 11.6 L20.4 16.12 L10.86 25.67 Z', '#6f8fc0'],
+    ['M1.74 25.74 L6.33 21.14 L10.86 25.67 L6.26 30.26 Z', '#f8f5ef'],
+  ],
+  seams: ['M6.33 21.14 L10.86 25.67'],
+}
+
+function toolCursor() {
+  const tool = tools.tool === 'eraser' ? RUBBER : PENCIL
+  const path = (d, attrs) => `<path d="${d}" ${attrs}/>`
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+    path(tool.outline, 'fill="none" stroke="#000" stroke-opacity=".45" stroke-width="2.6" stroke-linejoin="round"') +
+    tool.parts.map(([d, fill]) => path(d, `fill="${fill || tools.color}"`)).join('') +
+    tool.seams.map((d) => path(d, 'fill="none" stroke="#000" stroke-opacity=".22" stroke-width=".8"')).join('') +
+    path(tool.outline, 'fill="none" stroke="#fff" stroke-width="1.05" stroke-linejoin="round"') +
+    '</svg>'
+  // The hotspot is the point of the tool, not its middle.
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${tool.hot}, crosshair`
+}
+
 function renderTools() {
   ui.room.classList.toggle('pen', Boolean(tools.tool) && boardOpen())
+  ui.board.style.cursor = tools.tool ? toolCursor() : ''
   ui.pen.classList.toggle('active', tools.tool === 'pen')
   ui.eraser.classList.toggle('active', tools.tool === 'eraser')
   for (const swatch of ui.swatches.children) swatch.classList.toggle('active', swatch.dataset.color === tools.color)
@@ -2330,6 +2440,10 @@ ui.code.addEventListener('click', async () => {
 ui.leave.addEventListener('click', leaveRoom)
 
 ui.boardToggle.addEventListener('click', () => setBoardOpen(!boardOpen()))
+ui.boardMenu.addEventListener('pointerenter', holdBoardMenu)
+ui.boardMenu.addEventListener('pointerleave', () => releaseBoardMenu())
+ui.boardMenu.addEventListener('focusin', holdBoardMenu)
+ui.boardMenu.addEventListener('focusout', () => releaseBoardMenu())
 ui.room.classList.add('board-visible')
 ui.boardVisibility.addEventListener('click', () => {
   const visible = ui.room.classList.toggle('board-visible')
@@ -2373,17 +2487,18 @@ renderTools()
 ui.board.addEventListener('pointerdown', (event) => {
   if (!tools.tool || event.button !== 0 || !session.room) return
   ui.board.setPointerCapture(event.pointerId)
-  const id = `${selfId}:${Date.now().toString(36)}:${strokeCount++}`
   const color = tools.tool === 'eraser' ? ERASER : tools.color
-  const stroke = addStrokeChunk(session.board, {id, color, size: tools.size, at: nextRevision(session.board.revision), points: boardPoints(event).slice(0, 2)})
-  drawing = stroke && {stroke, sent: 0}
-  if (stroke) drawStroke(boardContext(), stroke, currentPictureRect())
+  if (!startStroke(boardPoints(event).slice(0, 2), color, tools.size)) return boardFull()
+  drawStroke(boardContext(), drawing.stroke, currentPictureRect())
 })
 ui.board.addEventListener('pointermove', (event) => {
   if (!drawing) return
-  const {stroke} = drawing
-  const from = stroke.points.length
-  if (!addStrokeChunk(session.board, {...stroke, offset: from, points: boardPoints(event)})) return (drawing = null)
+  const points = boardPoints(event, lastPoint(drawing.stroke))
+  if (!points.length) return
+  if (!extendStroke(points)) {
+    drawing = null
+    boardFull()
+  }
   syncBoardLayout(true)
 })
 ui.board.addEventListener('pointerup', endStroke)

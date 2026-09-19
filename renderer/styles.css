@@ -1310,8 +1310,8 @@ button:disabled {
   transition: opacity 150ms ease, visibility 0s 150ms;
 }
 
-.board-menu:hover .board-visibility-menu,
-.board-menu:focus-within .board-visibility-menu {
+/* Opened by pointer or focus in app.js, which also closes it again on its own. */
+.board-menu.menu-open .board-visibility-menu {
   visibility: visible;
   opacity: 1;
   transition-delay: 150ms, 0s;
@@ -1333,7 +1333,6 @@ button:disabled {
 
 .room.pen .board {
   pointer-events: auto;
-  cursor: crosshair;
 }
 
 .board-tools {
