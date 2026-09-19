@@ -13,11 +13,11 @@ test('versions compare by number, with or without a leading v', () => {
 
 const release = {
   tag_name: 'v0.1.5',
-  html_url: 'https://github.com/onlineslav/synced-video-player/releases/tag/v0.1.5',
+  html_url: 'https://github.com/onlineslav/watch-with-friends/releases/tag/v0.1.5',
   assets: [
-    {name: 'synced-video-player-0.1.5-windows-setup.exe', browser_download_url: 'https://github.com/a/windows.exe'},
-    {name: 'synced-video-player-0.1.5-mac-arm64.dmg', browser_download_url: 'https://github.com/a/arm64.dmg'},
-    {name: 'synced-video-player-0.1.5-mac-x64.dmg', browser_download_url: 'https://github.com/a/x64.dmg'},
+    {name: 'watch-with-friends-0.1.5-windows-setup.exe', browser_download_url: 'https://github.com/a/windows.exe'},
+    {name: 'watch-with-friends-0.1.5-mac-arm64.dmg', browser_download_url: 'https://github.com/a/arm64.dmg'},
+    {name: 'watch-with-friends-0.1.5-mac-x64.dmg', browser_download_url: 'https://github.com/a/x64.dmg'},
   ],
 }
 

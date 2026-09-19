@@ -70,5 +70,5 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" artifacts/* --clobber
           else
-            gh release create "$TAG" artifacts/* --title "Synced Video Player ${TAG#v}" --notes-file .github/release-notes.md
+            gh release create "$TAG" artifacts/* --title "Watch With Friends ${TAG#v}" --notes-file .github/release-notes.md
           fi

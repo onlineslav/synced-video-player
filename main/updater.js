@@ -1,7 +1,7 @@
 const {app, net, shell} = require('electron')
 const {macUpdate} = require('./release')
 
-const LATEST_RELEASE = 'https://api.github.com/repos/onlineslav/synced-video-player/releases/latest'
+const LATEST_RELEASE = 'https://api.github.com/repos/onlineslav/watch-with-friends/releases/latest'
 
 // Windows checks the GitHub releases once at launch and installs a newer version without asking.
 // Mac can't: Squirrel.Mac refuses to update an app that isn't signed with a Developer ID, and the

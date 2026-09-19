@@ -27,7 +27,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 480,
     backgroundColor: '#0b0b0f',
-    title: 'Synced Video Player',
+    title: 'Watch With Friends',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -53,7 +53,7 @@ const pickFile = (event, name, extensions) => pickFiles(event, name, extensions)
 
 function registerIpc() {
   ipcMain.handle('app:version', () => app.getVersion())
-  ipcMain.handle('app:open-project', () => shell.openExternal('https://github.com/onlineslav/synced-video-player'))
+  ipcMain.handle('app:open-project', () => shell.openExternal('https://github.com/onlineslav/watch-with-friends'))
   ipcMain.handle('youtube:titles', (_event, ids) => youTubeTitles(ids))
   ipcMain.handle('dialog:media', (event) => pickFile(event, 'Media', MEDIA_EXTENSIONS))
   ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))

@@ -5,11 +5,14 @@ const path = require('node:path')
 const root = path.resolve(__dirname, '..')
 const core = path.join(root, 'node_modules/@trystero-p2p/core')
 if (JSON.parse(fs.readFileSync(path.join(core, 'package.json'))).version !== '0.25.4') throw new Error('Review the Trystero transport patch before upgrading')
-const marker = '// synced-video-player transport hardening v2\n'
+const marker = '// watch-with-friends transport hardening v2\n'
+// The app was renamed after 0.4.3. A node_modules patched under the old name is already correct,
+// so the guard accepts either marker rather than patching the same file a second time.
+const patched = /^\/\/ (watch-with-friends|synced-video-player) transport hardening v2\n/
 function patch(name, edits) {
   const file = path.join(core, 'dist', name)
   let text = fs.readFileSync(file, 'utf8')
-  if (text.startsWith(marker)) return
+  if (patched.test(text)) return
   for (const [before, after] of edits) {
     if (!text.includes(before)) throw new Error(`Trystero patch context changed: ${name}`)
     text = text.replace(before, after)

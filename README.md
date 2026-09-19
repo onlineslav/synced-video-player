@@ -1,4 +1,4 @@
-# Synced Video Player
+# Watch With Friends - Synced Media Player
 
 Watch or listen to a media file together on Windows or Mac, with up to eight people. One person hosts and streams the file. Anyone can play, pause, seek, or switch the audio track, and everyone sees the change.
 
@@ -40,13 +40,13 @@ Once accepted, the friends list shows an online count and each friend's **Online
 
 ## Installing
 
-**[Download the latest release](https://github.com/onlineslav/synced-video-player/releases/latest)**
+**[Download the latest release](https://github.com/onlineslav/watch-with-friends/releases/latest)**
 
-- **Windows:** run `synced-video-player-…-windows-setup.exe`. If SmartScreen appears, click **More info → Run anyway** (once).
+- **Windows:** run `watch-with-friends-…-windows-setup.exe`. If SmartScreen appears, click **More info → Run anyway** (once).
 - **Mac:** open the `.dmg` for your Mac (`arm64` = Apple Silicon, `x64` = Intel) and drag the app to Applications. The app isn't notarized, so run this in Terminal once before the first launch:
 
   ```sh
-  xattr -cr "/Applications/Synced Video Player.app"
+  xattr -cr "/Applications/Watch With Friends.app"
   ```
 
 ## Connection problems
@@ -85,7 +85,9 @@ npm run dist:win # Windows installer in dist/
 npm run dist:mac # Mac .dmg in dist/ (must run on a Mac)
 ```
 
-`npm start` uses a separate **Synced Video Player Development** profile, so it can run alongside the installed app without locking its settings or cache. The development copy asks you to set up its own username on first launch; your installed app keeps its existing identity and friends. Launching the same profile again focuses its existing window.
+The app was called *Synced Video Player* up to 0.4.3. Because the user-data folder follows the product name, the first launch of a renamed build copies the old profile across, so your identity, friends and saved rooms carry over. Caches are left behind and the copy happens only once.
+
+`npm start` uses a separate **Watch With Friends Development** profile, so it can run alongside the installed app without locking its settings or cache. The development copy asks you to set up its own username on first launch; your installed app keeps its existing identity and friends. Launching the same profile again focuses its existing window.
 
 Starting the **Build** workflow by hand builds Windows, Apple Silicon and Intel Mac installers as workflow artifacts. Pushing a version tag builds them and publishes a GitHub Release:
 

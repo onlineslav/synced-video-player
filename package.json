@@ -1,8 +1,8 @@
 {
-  "name": "synced-video-player",
-  "productName": "Synced Video Player",
+  "name": "watch-with-friends",
+  "productName": "Watch With Friends",
   "version": "0.4.3",
-  "description": "Watch local video files together. One host streams, everyone stays in sync.",
+  "description": "Watch With Friends - Synced Media Player. One host streams, everyone stays in sync.",
   "main": "main/index.js",
   "private": true,
   "scripts": {
@@ -34,11 +34,11 @@
   "build": {
     "beforePack": "./scripts/check-turn-config.js",
     "appId": "app.syncedvideoplayer",
-    "productName": "Synced Video Player",
+    "productName": "Watch With Friends",
     "publish": {
       "provider": "github",
       "owner": "onlineslav",
-      "repo": "synced-video-player"
+      "repo": "watch-with-friends"
     },
     "files": [
       "main/**",

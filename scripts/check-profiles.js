@@ -11,7 +11,7 @@ if (process.versions.electron) {
   const [root, kind] = process.argv.slice(2)
   app.setPath('appData', root)
   if (kind === 'installed') {
-    const profile = path.join(root, 'Synced Video Player')
+    const profile = path.join(root, 'Watch With Friends')
     fs.mkdirSync(profile, {recursive: true})
     app.setPath('userData', profile)
     app.setPath('sessionData', profile)
@@ -34,7 +34,7 @@ if (process.versions.electron) {
   }
 } else {
   const {spawn} = require('node:child_process')
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synced-profile-check-'))
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wwf-profile-check-'))
   fs.writeFileSync(path.join(root, 'probe.html'), '<!doctype html><title>Profile test</title>')
   const env = {...process.env}
   delete env.ELECTRON_RUN_AS_NODE

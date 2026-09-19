@@ -15,9 +15,9 @@ Download the file for your computer from **Assets** below:
 
 | Computer | File |
 | --- | --- |
-| Windows | `synced-video-player-...-windows-setup.exe` |
-| Mac with Apple Silicon (M1, M2, M3, M4...) | `synced-video-player-...-mac-arm64.dmg` |
-| Mac with Intel | `synced-video-player-...-mac-x64.dmg` |
+| Windows | `watch-with-friends-...-windows-setup.exe` |
+| Mac with Apple Silicon (M1, M2, M3, M4...) | `watch-with-friends-...-mac-arm64.dmg` |
+| Mac with Intel | `watch-with-friends-...-mac-x64.dmg` |
 
 Not sure which Mac you have? Open the Apple menu, then **About This Mac**. "Chip: Apple M..." means Apple Silicon; "Processor: Intel" means Intel.
 
@@ -27,7 +27,7 @@ Not sure which Mac you have? Open the Apple menu, then **About This Mac**. "Chip
 - **Mac:** open the `.dmg` and drag the app into **Applications**. Then open **Terminal**, paste this line, and press Enter (only needed once):
 
   ```sh
-  xattr -cr "/Applications/Synced Video Player.app"
+  xattr -cr "/Applications/Watch With Friends.app"
   ```
 
 ## Watching together

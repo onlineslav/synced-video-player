@@ -18,7 +18,7 @@ function registerYouTube(target = session.defaultSession) {
   })
   // Desktop embeds have no HTTP referrer by default. Identify this app as required by YouTube.
   target.webRequest.onBeforeSendHeaders({urls: ['https://www.youtube.com/*']}, (details, callback) => {
-    callback({requestHeaders: {...details.requestHeaders, Referer: 'https://app.syncedvideoplayer/'}})
+    callback({requestHeaders: {...details.requestHeaders, Referer: 'https://app.watchwithfriends/'}})
   })
 }
 
