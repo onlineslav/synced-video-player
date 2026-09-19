@@ -2973,9 +2973,12 @@ async function importYouTube(form, {replace = true} = {}) {
   const current = session
   const importer = new YouTubePlayer(document.createElement('div'))
   const cleanup = () => importer.close()
-  const status = (text) => {
+  // The panel holding the status line is hidden while media plays (and the playlist drawer can be
+  // closed), so a drop onto the stage would report into nothing. Fall back to the toast.
+  const status = (text, isError = false) => {
     statusElement.textContent = text
     statusElement.hidden = !text
+    if (text && !statusElement.offsetParent) toast(text, isError)
   }
   try {
     const {videoId, playlistId} = parseYouTubeUrl(input.value)
@@ -3013,7 +3016,7 @@ async function importYouTube(form, {replace = true} = {}) {
     loadAddedMedia(added, {replace})
     render()
   } catch (error) {
-    if (session === current && !current.closed) status(errorMessage(error))
+    if (session === current && !current.closed) status(errorMessage(error), true)
   } finally {
     current.lifetime.signal.removeEventListener('abort', cleanup)
     importer.container.remove()
@@ -3313,9 +3316,19 @@ ui.stage.addEventListener('drop', (event) => {
   ui.stage.classList.remove('dragging')
   const file = event.dataTransfer.files[0]
   const filePath = file && window.api.pathForFile(file)
-  if (!filePath) return // not a file on disk (dragged from a page, or from inside the app)
-  if (!SUBTITLE_FILE.test(filePath)) return loadAddedMedia(addToPlaylist([filePath]), {replace: true})
-  addSubtitleFile(filePath)
+  if (filePath) {
+    if (!SUBTITLE_FILE.test(filePath)) return loadAddedMedia(addToPlaylist([filePath]), {replace: true})
+    return addSubtitleFile(filePath)
+  }
+  // Not a file on disk: a link dragged from a browser, or something from inside the app.
+  const dropped = {uriList: event.dataTransfer.getData('text/uri-list'),
+    text: event.dataTransfer.getData('text/plain'), mozUrl: event.dataTransfer.getData('text/x-moz-url')}
+  if (!Object.values(dropped).some((value) => value && value.trim())) return
+  if (importingYouTube) return toast('A YouTube import is already in progress. Try again when it finishes.')
+  try {
+    ui.mediaUrl.value = droppedYouTubeUrl(dropped)
+    importYouTube(ui.mediaUrlForm, {replace: true})
+  } catch (error) { toast(errorMessage(error), true) }
 })
 
 window.addEventListener('beforeunload', () => {
