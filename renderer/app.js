@@ -28,6 +28,7 @@ import {RoomHistory} from './room-history.mjs'
 import {RoomPresence} from './room-presence.mjs'
 import {drawConfetti, launchConfetti, stepConfetti} from './confetti.mjs'
 import {REACTIONS, createRateLimiter, playReactionSound} from './reactions.mjs'
+import {clampZoom, stepZoom, parseZoom, formatZoom, zoomPercent, MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM} from './zoom.mjs'
 import {captionHtml} from './subtitles.mjs'
 import {
   DRAWER,
@@ -153,6 +154,11 @@ const ui = {
   inviteFriends: $('invite-friends'),
   pinButtons: document.querySelectorAll('[data-pin]'),
   settings: $('settings'),
+  zoomRow: document.querySelector('.zoom-row'),
+  zoomSlider: $('zoom-slider'),
+  zoomPercent: $('zoom-percent'),
+  zoomReset: $('zoom-reset'),
+  zoomBadge: $('zoom-badge'),
   settingsUsername: $('settings-username'),
   settingsBack: $('settings-back'),
   addFriend: $('add-friend'),
@@ -2820,6 +2826,72 @@ function showSettings(open) {
   }
   ui.settings.hidden = !open
 }
+
+// ---------- UI scale ----------
+// Electron scales the whole page, video included. main/zoom.js hands us Ctrl +/-/0 and Ctrl+wheel
+// because the default menu's zoom-in accelerator needs Ctrl+Shift+= on a US keyboard.
+let zoom = DEFAULT_ZOOM
+try {
+  zoom = clampZoom(localStorage.getItem('uiScale') ?? DEFAULT_ZOOM)
+} catch {}
+
+// typing: the percent box is mid-edit, so it keeps what was typed until it loses focus.
+function applyZoom(factor, {badge = false, typing = false} = {}) {
+  zoom = clampZoom(factor)
+  const percent = zoomPercent(zoom)
+  ui.zoomSlider.value = String(percent)
+  ui.zoomRow.style.setProperty('--ratio', String((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)))
+  if (!typing) ui.zoomPercent.value = String(percent)
+  ui.zoomReset.hidden = zoom === DEFAULT_ZOOM
+  window.api.setZoom(zoom)
+  try {
+    localStorage.setItem('uiScale', String(zoom))
+  } catch {}
+  if (badge && ui.settings.hidden) showZoomBadge()
+}
+
+// A badge, because the keyboard and the wheel work from anywhere. Clicking it goes back to 100%,
+// and hovering it holds it open long enough to click. It is position: fixed, so in a room it has to
+// live inside .room, which is the element that goes fullscreen.
+let zoomBadgeTimer = null
+function showZoomBadge() {
+  ;(ui.room.hidden ? document.body : ui.room).append(ui.zoomBadge)
+  ui.zoomBadge.textContent = formatZoom(zoom)
+  if (zoom !== DEFAULT_ZOOM) ui.zoomBadge.append(element('span', 'zoom-badge-hint', 'click to reset'))
+  ui.zoomBadge.hidden = false
+  hideZoomBadge()
+}
+function hideZoomBadge(delay = 1600) {
+  clearTimeout(zoomBadgeTimer)
+  zoomBadgeTimer = setTimeout(() => (ui.zoomBadge.hidden = true), delay)
+}
+
+window.api.onZoomStep((direction) => applyZoom(stepZoom(zoom, direction), {badge: true}))
+ui.zoomBadge.addEventListener('click', () => {
+  applyZoom(DEFAULT_ZOOM)
+  hideZoomBadge(600)
+})
+ui.zoomBadge.addEventListener('pointerenter', () => clearTimeout(zoomBadgeTimer))
+ui.zoomBadge.addEventListener('pointerleave', () => hideZoomBadge(400))
+
+ui.zoomSlider.addEventListener('input', () => applyZoom(Number(ui.zoomSlider.value) / 100))
+ui.zoomReset.addEventListener('click', () => applyZoom(DEFAULT_ZOOM))
+// Every keystroke that reads as a scale applies live; anything else waits, so a half-typed
+// number never snaps the window. Leaving the box (or Enter) settles it on what actually applied.
+ui.zoomPercent.addEventListener('input', () => {
+  const typed = parseZoom(ui.zoomPercent.value)
+  if (typed !== null) applyZoom(typed, {typing: true})
+})
+ui.zoomPercent.addEventListener('change', () => applyZoom(zoom))
+ui.zoomPercent.addEventListener('blur', () => applyZoom(zoom))
+ui.zoomPercent.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') ui.zoomPercent.blur()
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  event.preventDefault() // a text box has no steppers of its own
+  applyZoom(zoom + (event.key === 'ArrowUp' ? 0.05 : -0.05))
+})
+
+applyZoom(zoom)
 
 ui.openSettings.addEventListener('click', () => showSettings(true))
 ui.roomSettings.addEventListener('click', () => showSettings(true))

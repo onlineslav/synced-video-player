@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('api', {
   subtitleCues: (options) => ipcRenderer.invoke('subtitle:cues', options),
   iceServers: () => ipcRenderer.invoke('net:ice-servers'),
   setPinned: (pinned) => ipcRenderer.invoke('window:pin', pinned),
+  setZoom: (factor) => ipcRenderer.invoke('window:zoom', factor),
+  onZoomStep: (handler) => ipcRenderer.on('zoom:step', (_event, direction) => handler(direction)),
   setInRoom: (inRoom) => ipcRenderer.send('app:in-room', inRoom),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
   openUpdate: (which) => ipcRenderer.invoke('update:open', which),

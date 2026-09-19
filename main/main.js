@@ -5,6 +5,7 @@ const media = require('./media')
 const {loadIceServers} = require('./turn')
 const updater = require('./updater')
 const {focusWindow} = require('./startup')
+const {watchZoom, zoomFactor} = require('./zoom')
 const IMAGES = require('../shared/images.json')
 const {prepareYouTube, registerYouTube, youTubeTitles} = require('./youtube')
 
@@ -36,6 +37,7 @@ function createWindow() {
     },
   })
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'))
+  watchZoom(win.webContents)
   return win
 }
 
@@ -72,6 +74,11 @@ function registerIpc() {
   ipcMain.handle('net:ice-servers', () => {
     const local = path.join(app.getPath('userData'), 'turn.json')
     return fs.existsSync(local) ? loadIceServers(local) : loadIceServers(turnConfigPath(), {publicOnly: app.isPackaged})
+  })
+  ipcMain.handle('window:zoom', (event, factor) => {
+    const contents = event.sender
+    contents.setZoomFactor(zoomFactor(factor))
+    return contents.getZoomFactor()
   })
   ipcMain.handle('window:pin', (event, pinned) => {
     const win = BrowserWindow.fromWebContents(event.sender)

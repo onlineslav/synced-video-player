@@ -127,6 +127,18 @@
           <p class="hint">What people see. You can change it any time.</p>
         </section>
         <section class="settings-section">
+          <h2>UI scale</h2>
+          <p class="hint">How big everything is drawn. Ctrl with + or &minus; changes it from anywhere, Ctrl 0 goes back to 100%.</p>
+          <div class="zoom-row">
+            <input id="zoom-slider" class="zoom-slider" type="range" min="50" max="200" step="1" value="100" aria-label="UI scale" />
+            <div class="zoom-field">
+              <input id="zoom-percent" class="zoom-percent" type="text" inputmode="numeric" maxlength="4" spellcheck="false" autocomplete="off" value="100" aria-label="UI scale, percent" />
+              <span class="zoom-unit" aria-hidden="true">%</span>
+            </div>
+            <button id="zoom-reset" class="link-button" type="button">Reset</button>
+          </div>
+        </section>
+        <section class="settings-section">
           <h2>Username</h2>
           <p class="hint">Friends add you by this. Changing it gives you a new one, and friends who added you will have to add you again.</p>
           <div class="settings-row">
@@ -136,6 +148,8 @@
         </section>
       </div>
     </div>
+
+    <button id="zoom-badge" class="zoom-badge" type="button" title="Back to 100%" hidden></button>
 
     <section id="room" class="room" hidden>
       <header class="topbar">

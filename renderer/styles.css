@@ -712,6 +712,112 @@ button:disabled {
   gap: 8px;
 }
 
+.zoom-row {
+  --ratio: 0.33;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zoom-slider {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.zoom-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) calc(6px + (100% - 12px) * var(--ratio)),
+    rgba(255, 255, 255, 0.3) calc(6px + (100% - 12px) * var(--ratio))
+  );
+}
+
+.zoom-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #fff;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+
+.zoom-slider:hover::-webkit-slider-thumb,
+.zoom-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.15);
+}
+
+/* The box and its % read as one field, so the unit doesn't drift when the number gets shorter. */
+.zoom-field {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.zoom-field:focus-within {
+  border-color: var(--accent);
+}
+
+.zoom-percent {
+  width: 3.2ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: right;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-percent:focus {
+  outline: none;
+}
+
+.zoom-unit {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* Shown for a moment when the keyboard or the wheel changes the scale, so it reads the same on
+   home, in a room and in fullscreen. Clicking it goes back to 100%. It is position: fixed, outside
+   the layout, and app.js moves it into .room so it survives fullscreen. */
+.zoom-badge {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(22, 22, 29, 0.95);
+  border: 1px solid var(--line);
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  z-index: 60;
+}
+
+.zoom-badge:hover {
+  border-color: var(--accent);
+}
+
+.zoom-badge .zoom-badge-hint {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .link-button {
   padding: 0;
   border: 0;
