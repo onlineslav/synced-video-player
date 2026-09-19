@@ -2593,6 +2593,7 @@ loadIdentity().then((loaded) => {
 window.api.getVersion().then((version) => {
   if (typeof version === 'string' && version.length <= 40) ui.appVersion.textContent = `Version ${version}`
 }, () => {})
+ui.appVersion.addEventListener('click', () => window.api.openProject())
 
 // Mac can't install updates itself, so home shows a card when a newer release is out.
 window.api.checkForUpdate().then((update) => {

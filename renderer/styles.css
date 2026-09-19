@@ -220,10 +220,16 @@ button.ghost {
   position: fixed;
   left: 16px;
   bottom: 16px;
+  padding: 0;
+  background: transparent;
+  border: 0;
   color: var(--muted);
   font-size: 12px;
   user-select: none;
 }
+
+.home-version:hover { color: var(--text); text-decoration: underline; }
+.home-version:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .pin-toggle[aria-pressed='true'] svg,
 .controls .pin-toggle[aria-pressed='true'] svg {

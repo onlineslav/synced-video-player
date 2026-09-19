@@ -1,6 +1,6 @@
 const path = require('node:path')
 const fs = require('node:fs')
-const {app, BrowserWindow, dialog, ipcMain} = require('electron')
+const {app, BrowserWindow, dialog, ipcMain, shell} = require('electron')
 const media = require('./media')
 const {loadIceServers} = require('./turn')
 const updater = require('./updater')
@@ -51,6 +51,7 @@ const pickFile = (event, name, extensions) => pickFiles(event, name, extensions)
 
 function registerIpc() {
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:open-project', () => shell.openExternal('https://github.com/onlineslav/synced-video-player'))
   ipcMain.handle('youtube:titles', (_event, ids) => youTubeTitles(ids))
   ipcMain.handle('dialog:media', (event) => pickFile(event, 'Media', MEDIA_EXTENSIONS))
   ipcMain.handle('dialog:media-files', (event) => pickFiles(event, 'Media', MEDIA_EXTENSIONS, true))
