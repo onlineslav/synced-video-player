@@ -223,12 +223,15 @@ button.ghost {
   padding: 0;
   background: transparent;
   border: 0;
-  color: var(--muted);
+  color: var(--text);
   font-size: 12px;
   user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.15s;
 }
 
-.home-version:hover { color: var(--text); text-decoration: underline; }
+.home-version:hover,
+.home-version:focus-visible { opacity: 1; }
 .home-version:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .pin-toggle[aria-pressed='true'] svg,
@@ -964,8 +967,8 @@ button:disabled {
 }
 
 .playlist-add svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -973,10 +976,10 @@ button:disabled {
   stroke-linejoin: round;
 }
 
-/* The plus is drawn 1:1 at 18px; the link's 24 viewBox needs a thicker
+/* The plus is drawn 1:1 at 16px; the link's 24 viewBox needs a thicker
    nominal stroke to land on the same 2px as the plus and the rings. */
 #playlist-add-url svg {
-  stroke-width: 2.667;
+  stroke-width: 3;
 }
 
 .playlist-add-area {
@@ -999,8 +1002,16 @@ button:disabled {
 }
 
 .playlist-add-or {
+  /* Matches the buttons' height so the word centres on the circles' centre
+     line, less 1px of bottom padding: "or" has no ascender or descender, so
+     its x-height band otherwise reads half a pixel low. */
+  display: grid;
+  place-items: center;
+  height: 36px;
+  padding-bottom: 1px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1;
   user-select: none;
 }
 
