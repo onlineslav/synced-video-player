@@ -62,23 +62,53 @@ test('percentages read the way they are shown', () => {
   assert.equal(formatZoom(1.75), '175%')
 })
 
+// zoomDirection reads process.platform at call time, so both branches can be exercised
+// wherever the tests run. Without this the Mac branch was never covered: the Windows-shaped
+// events every case used left input.meta false, so on a Mac every assertion saw null.
+const withPlatform = (platform, run) => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')
+  Object.defineProperty(process, 'platform', {value: platform, configurable: true})
+  try {
+    run((over) => ({
+      type: 'keyDown',
+      control: platform !== 'darwin',
+      meta: platform === 'darwin',
+      alt: false,
+      key: '',
+      code: '',
+      ...over,
+    }))
+  } finally {
+    Object.defineProperty(process, 'platform', original)
+  }
+}
+
 // The bug this fixes: Ctrl+= has to zoom in, not only Ctrl+Shift+= (the "+" the default menu wants).
 test('zoomDirection reads every way of asking', () => {
-  const key = (over) => ({type: 'keyDown', control: true, alt: false, meta: false, key: '', code: '', ...over})
-  assert.equal(zoomDirection(key({key: '='})), 1)
-  assert.equal(zoomDirection(key({key: '+'})), 1)
-  assert.equal(zoomDirection(key({key: '+', code: 'NumpadAdd'})), 1)
-  assert.equal(zoomDirection(key({key: '-'})), -1)
-  assert.equal(zoomDirection(key({key: '_'})), -1)
-  assert.equal(zoomDirection(key({key: '0'})), 0)
+  for (const platform of ['win32', 'darwin']) withPlatform(platform, (key) => {
+    assert.equal(zoomDirection(key({key: '='})), 1, platform)
+    assert.equal(zoomDirection(key({key: '+'})), 1, platform)
+    assert.equal(zoomDirection(key({key: '+', code: 'NumpadAdd'})), 1, platform)
+    assert.equal(zoomDirection(key({key: '-'})), -1, platform)
+    assert.equal(zoomDirection(key({key: '_'})), -1, platform)
+    assert.equal(zoomDirection(key({key: '0'})), 0, platform)
+  })
 })
 
 test('zoomDirection ignores keys that are not a zoom request', () => {
-  const key = (over) => ({type: 'keyDown', control: true, alt: false, meta: false, key: '', code: '', ...over})
-  assert.equal(zoomDirection(key({key: 'a'})), null)
-  assert.equal(zoomDirection(key({key: '=', control: false})), null)
-  assert.equal(zoomDirection(key({key: '=', alt: true})), null)
-  assert.equal(zoomDirection(key({key: '=', type: 'keyUp'})), null)
+  for (const platform of ['win32', 'darwin']) withPlatform(platform, (key) => {
+    assert.equal(zoomDirection(key({key: 'a'})), null, platform)
+    assert.equal(zoomDirection(key({key: '=', control: false, meta: false})), null, platform)
+    assert.equal(zoomDirection(key({key: '=', alt: true})), null, platform)
+    assert.equal(zoomDirection(key({key: '=', type: 'keyUp'})), null, platform)
+  })
+})
+
+// Each platform takes its own modifier: Cmd is the zoom key on a Mac, Ctrl everywhere else,
+// and the other one has to stay out of the way.
+test('zoomDirection takes only its own platform modifier', () => {
+  withPlatform('win32', (key) => assert.equal(zoomDirection(key({key: '=', control: false, meta: true})), null))
+  withPlatform('darwin', (key) => assert.equal(zoomDirection(key({key: '=', control: true, meta: false})), null))
 })
 
 test('zoomFactor refuses a value that would make the window unusable', () => {
@@ -89,15 +119,17 @@ test('zoomFactor refuses a value that would make the window unusable', () => {
 })
 
 test('watchZoom sends a step and stops the menu accelerator', () => {
-  const handlers = {}
-  const sent = []
-  let prevented = 0
-  watchZoom({on: (name, fn) => (handlers[name] = fn), send: (...args) => sent.push(args)})
+  for (const platform of ['win32', 'darwin']) withPlatform(platform, (key) => {
+    const handlers = {}
+    const sent = []
+    let prevented = 0
+    watchZoom({on: (name, fn) => (handlers[name] = fn), send: (...args) => sent.push(args)})
 
-  handlers['before-input-event']({preventDefault: () => prevented++}, {type: 'keyDown', control: true, key: '='})
-  handlers['before-input-event']({preventDefault: () => prevented++}, {type: 'keyDown', control: true, key: 'a'})
-  handlers['zoom-changed']({}, 'out')
+    handlers['before-input-event']({preventDefault: () => prevented++}, key({key: '='}))
+    handlers['before-input-event']({preventDefault: () => prevented++}, key({key: 'a'}))
+    handlers['zoom-changed']({}, 'out')
 
-  assert.deepEqual(sent, [['zoom:step', 1], ['zoom:step', -1]])
-  assert.equal(prevented, 1)
+    assert.deepEqual(sent, [['zoom:step', 1], ['zoom:step', -1]], platform)
+    assert.equal(prevented, 1, platform)
+  })
 })
